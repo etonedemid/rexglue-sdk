@@ -22,6 +22,8 @@
 #include <rex/system/function_dispatcher.h>
 #include <rex/system/thread_state.h>
 
+#include <chrono>
+
 namespace rex::runtime {
 
 FunctionDispatcher::FunctionDispatcher(rex::memory::Memory* memory, ExportResolver* export_resolver)
@@ -109,7 +111,13 @@ uint64_t FunctionDispatcher::ExecuteInterrupt(ThreadState* thread_state, uint32_
   // Hold the global lock during interrupt dispatch.
   // This will block if any code is in a critical region (has interrupts
   // disabled) or if any other interrupt is executing.
+  auto lock_start = std::chrono::steady_clock::now();
   auto global_lock = global_critical_region_.Acquire();
+  auto lock_end = std::chrono::steady_clock::now();
+  auto lock_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(lock_end - lock_start).count();
+  if (lock_wait_ms > 100) {
+    REXSYS_WARN("ExecuteInterrupt: waited {}ms to acquire global_critical_region", lock_wait_ms);
+  }
 
   auto* ctx = thread_state->context();
   assert_true(arg_count <= 5);

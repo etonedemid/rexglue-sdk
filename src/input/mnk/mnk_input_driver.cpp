@@ -24,6 +24,10 @@
 #if REX_PLATFORM_WIN32
 #include <rex/ui/window_win.h>
 #include <Windows.h>
+#elif REX_PLATFORM_GNULINUX
+#include <rex/ui/window_gtk.h>
+#include <gdk/gdkx.h>
+#include <X11/Xlib.h>
 #endif
 
 REXCVAR_DEFINE_BOOL(mnk_mode, false, "Input", "Enable keyboard/mouse controller emulation");
@@ -272,6 +276,8 @@ void MnkInputDriver::CenterCursor() {
     SetCursorPos(pt.x, pt.y);
   }
 #endif
+  // On Linux, cursor warping is done from OnMouseMove (UI thread) to avoid
+  // X11 threading deadlocks.  Only prev_mouse coords are updated here.
 }
 
 void MnkInputDriver::UpdateMouseCapture() {
@@ -362,13 +368,53 @@ void MnkInputDriver::OnMouseUp(rex::ui::MouseEvent& e) {
 void MnkInputDriver::OnMouseMove(rex::ui::MouseEvent& e) {
   if (!IsEnabled() || !has_focus_)
     return;
-  std::lock_guard lock(state_mutex_);
-  int32_t x = e.x();
-  int32_t y = e.y();
-  mouse_dx_ += x - prev_mouse_x_;
-  mouse_dy_ += y - prev_mouse_y_;
-  prev_mouse_x_ = x;
-  prev_mouse_y_ = y;
+
+#if REX_PLATFORM_GNULINUX
+  bool do_warp = false;
+  int32_t warp_x = 0, warp_y = 0;
+#endif
+
+  {
+    std::lock_guard lock(state_mutex_);
+    int32_t x = e.x();
+    int32_t y = e.y();
+    mouse_dx_ += x - prev_mouse_x_;
+    mouse_dy_ += y - prev_mouse_y_;
+    prev_mouse_x_ = x;
+    prev_mouse_y_ = y;
+
+#if REX_PLATFORM_GNULINUX
+    // On Linux, warp the cursor back to center from the UI thread (where
+    // OnMouseMove runs) rather than from CenterCursor (game thread), because
+    // X11 Display connections are not thread-safe and warping from the game
+    // thread deadlocks with the GTK main loop.
+    if (mouse_captured_ && attached_window_) {
+      warp_x = static_cast<int32_t>(attached_window_->GetActualLogicalWidth() / 2);
+      warp_y = static_cast<int32_t>(attached_window_->GetActualLogicalHeight() / 2);
+      if (x != warp_x || y != warp_y) {
+        prev_mouse_x_ = warp_x;
+        prev_mouse_y_ = warp_y;
+        do_warp = true;
+      }
+    }
+#endif
+  }
+
+#if REX_PLATFORM_GNULINUX
+  if (do_warp) {
+    auto* gtk_window = dynamic_cast<rex::ui::GTKWindow*>(attached_window_);
+    if (gtk_window && gtk_window->window()) {
+      GdkDisplay* display = gtk_widget_get_display(gtk_window->window());
+      if (GDK_IS_X11_DISPLAY(display)) {
+        Display* xdisplay = gdk_x11_display_get_xdisplay(display);
+        GdkWindow* gdk_win = gtk_widget_get_window(gtk_window->window());
+        Window xwindow = gdk_x11_window_get_xid(gdk_win);
+        XWarpPointer(xdisplay, None, xwindow, 0, 0, 0, 0, warp_x, warp_y);
+        XFlush(xdisplay);
+      }
+    }
+  }
+#endif
 }
 
 void MnkInputDriver::OnLostFocus(rex::ui::UISetupEvent&) {

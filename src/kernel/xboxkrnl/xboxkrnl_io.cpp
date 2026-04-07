@@ -227,20 +227,22 @@ ppc_u32_result_t NtReadFile_entry(ppc_u32_t file_handle, ppc_u32_t event_handle,
       // Queue the APC callback. It must be delivered via the APC mechanism even
       // though were are completing immediately.
       // Low bit probably means do not queue to IO ports.
+      // APC must fire for any completed result (including END_OF_FILE), not just
+      // SUCCESS — otherwise games using APC-chained reads hang on the last read
+      // that hits EOF since the completion callback never fires.  NtWriteFile
+      // queues unconditionally; we must match that behavior here.
       if ((uint32_t)apc_routine_ptr & ~1) {
-        if (apc_context && result == X_STATUS_SUCCESS) {
+        if (apc_context) {
           auto thread = XThread::GetCurrentThread();
           uint32_t apc_routine = static_cast<uint32_t>(apc_routine_ptr) & ~1u;
           uint32_t apc_ctx = apc_context.guest_address();
           uint32_t apc_arg1 = io_status_block.guest_address();
           REXKRNL_IMPORT_TRACE("NtReadFile",
-                               "queue_apc thid={} normal={:#x} ctx={:#x} arg1={:#x} arg2=0",
-                               thread ? thread->thread_id() : 0, apc_routine, apc_ctx, apc_arg1);
+                               "queue_apc thid={} normal={:#x} ctx={:#x} arg1={:#x} arg2=0 status={:#x}",
+                               thread ? thread->thread_id() : 0, apc_routine, apc_ctx, apc_arg1,
+                               result);
           thread->EnqueueApc(apc_routine, apc_ctx, apc_arg1, 0);
           apc_queued = true;
-        } else {
-          REXKRNL_IMPORT_TRACE("NtReadFile", "skip_apc_queue (apc_ctx={:#x}, status={:#x})",
-                               apc_context.guest_address(), result);
         }
       }
 
@@ -612,6 +614,13 @@ ppc_u32_result_t NtQueryDirectoryFile_entry(ppc_u32_t file_handle, ppc_u32_t eve
 ppc_u32_result_t NtFlushBuffersFile_entry(ppc_u32_t file_handle,
                                           ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block_ptr) {
   auto result = X_STATUS_SUCCESS;
+
+  auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
+  if (file) {
+    file->file()->Flush();
+  } else {
+    result = X_STATUS_INVALID_HANDLE;
+  }
 
   if (io_status_block_ptr) {
     io_status_block_ptr->status = result;

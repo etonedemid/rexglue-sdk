@@ -15,7 +15,6 @@
 
 #include <rex/platform.h>
 #include <rex/platform/dynlib.h>
-#include <rex/ui/renderdoc_api.h>
 #include <rex/ui/vulkan/api.h>
 
 namespace rex {
@@ -32,9 +31,6 @@ class VulkanInstance {
   VulkanInstance& operator=(VulkanInstance&&) = delete;
 
   ~VulkanInstance();
-
-  // nullptr if RenderDoc is not connected.
-  RenderDocAPI* renderdoc_api() const { return renderdoc_api_.get(); }
 
   struct Functions {
     // From the loader module.
@@ -105,8 +101,6 @@ class VulkanInstance {
 
  private:
   explicit VulkanInstance() = default;
-
-  std::unique_ptr<RenderDocAPI> renderdoc_api_;
 
   rex::platform::DynamicLibrary loader_;
 

@@ -63,4 +63,8 @@ X_STATUS HostPathFile::SetLength(size_t length) {
   }
 }
 
+void HostPathFile::Flush() {
+  file_handle_->Flush();
+}
+
 }  // namespace rex::filesystem

@@ -145,14 +145,22 @@ class PosixFileHandle : public FileHandle {
   PosixFileHandle(std::filesystem::path path, int handle)
       : FileHandle(std::move(path)), handle_(handle) {}
   ~PosixFileHandle() override {
+    fsync(handle_);
     close(handle_);
     handle_ = -1;
   }
   bool Read(size_t file_offset, void* buffer, size_t buffer_length,
             size_t* out_bytes_read) override {
     ssize_t out = pread(handle_, buffer, buffer_length, file_offset);
+    if (out <= 0) {
+      // pread returns 0 at EOF (not an error code) — treat it the same as an
+      // error so callers receive X_STATUS_END_OF_FILE, matching the behavior
+      // of Windows ReadFile which returns ERROR_HANDLE_EOF in this case.
+      *out_bytes_read = 0;
+      return false;
+    }
     *out_bytes_read = out;
-    return out >= 0 ? true : false;
+    return true;
   }
   bool Write(size_t file_offset, const void* buffer, size_t buffer_length,
              size_t* out_bytes_written) override {
@@ -169,24 +177,20 @@ class PosixFileHandle : public FileHandle {
 
 std::unique_ptr<FileHandle> FileHandle::OpenExisting(const std::filesystem::path& path,
                                                      uint32_t desired_access) {
-  int open_access = 0;
-  if (desired_access & FileAccess::kGenericRead) {
-    open_access |= O_RDONLY;
-  }
-  if (desired_access & FileAccess::kGenericWrite) {
-    open_access |= O_WRONLY;
-  }
-  if (desired_access & FileAccess::kGenericExecute) {
-    open_access |= O_RDONLY;
-  }
-  if (desired_access & FileAccess::kGenericAll) {
-    open_access |= O_RDWR;
-  }
-  if (desired_access & FileAccess::kFileReadData) {
-    open_access |= O_RDONLY;
-  }
-  if (desired_access & FileAccess::kFileWriteData) {
-    open_access |= O_WRONLY;
+  // O_RDONLY(0), O_WRONLY(1), O_RDWR(2) are NOT bitmask flags on POSIX.
+  // We must compute the correct access mode explicitly.
+  bool wants_read = (desired_access & (FileAccess::kGenericRead | FileAccess::kFileReadData |
+                                       FileAccess::kGenericExecute | FileAccess::kGenericAll)) != 0;
+  bool wants_write = (desired_access & (FileAccess::kGenericWrite | FileAccess::kFileWriteData |
+                                        FileAccess::kFileAppendData | FileAccess::kGenericAll)) != 0;
+
+  int open_access;
+  if (wants_read && wants_write) {
+    open_access = O_RDWR;
+  } else if (wants_write) {
+    open_access = O_WRONLY;
+  } else {
+    open_access = O_RDONLY;
   }
   if (desired_access & FileAccess::kFileAppendData) {
     open_access |= O_APPEND;

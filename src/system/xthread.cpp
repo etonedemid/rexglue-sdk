@@ -33,6 +33,11 @@
 #include <rex/kernel/xboxkrnl/threading.h>
 #include <rex/system/xevent.h>
 #include <rex/system/xmutant.h>
+
+#ifdef __linux__
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 #include <rex/system/xthread.h>
 #include <rex/thread.h>
 
@@ -474,6 +479,8 @@ X_STATUS XThread::Create() {
 }
 
 X_STATUS XThread::Exit(int exit_code) {
+  REXSYS_INFO("XThread::Exit thid {} (handle={:08X}, '{}') exit_code={}", thread_id_, handle(),
+              thread_name_, exit_code);
   // This may only be called on the thread itself.
   assert_true(XThread::GetCurrentThread() == this);
   // Keep the object alive until Thread::Exit() transitions the host thread
@@ -546,8 +553,11 @@ X_STATUS XThread::Terminate(int exit_code) {
 }
 
 void XThread::Execute() {
-  REXSYS_DEBUG("Execute thid {} (handle={:08X}, '{}', native={:08X})", thread_id_, handle(),
-               thread_name_, thread_->system_id());
+#ifdef __linux__
+  linux_tid_ = static_cast<uint32_t>(syscall(SYS_gettid));
+#endif
+  REXSYS_INFO("Execute thid {} (handle={:08X}, '{}', native={:08X})", thread_id_, handle(),
+              thread_name_, thread_->system_id());
 
   // Let the kernel know we are starting.
   kernel_state_->OnThreadExecute(this);
@@ -621,9 +631,10 @@ void XThread::Execute() {
   main_fiber_ = rex::thread::Fiber::ConvertCurrentThread();
 
   // Execute the function
-  REXSYS_DEBUG("XThread::Execute - Calling function at {:08X}", address);
+  REXSYS_INFO("XThread::Execute thid {} - Calling function at {:08X}", thread_id_, address);
   func(*ctx, base);
 
+  REXSYS_INFO("XThread::Execute thid {} - Function {:08X} returned", thread_id_, address);
   exit_code = static_cast<int>(ctx->r3.u32);
 
   // If we got here it means the execute completed without an exit being called.
@@ -1418,6 +1429,9 @@ XHostThread::XHostThread(KernelState* kernel_state, uint32_t stack_size, uint32_
 }
 
 void XHostThread::Execute() {
+#ifdef __linux__
+  linux_tid_ = static_cast<uint32_t>(syscall(SYS_gettid));
+#endif
   REXSYS_INFO("XThread::Execute thid {} (handle={:08X}, '{}', native={:08X}, <host>)", thread_id_,
               handle(), thread_name_, thread_->system_id());
 

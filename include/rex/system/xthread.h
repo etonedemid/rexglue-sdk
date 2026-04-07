@@ -326,6 +326,7 @@ class XThread : public XObject {
   bool is_running() const { return running_; }
 
   uint32_t thread_id() const { return thread_id_; }
+  uint32_t linux_tid() const { return linux_tid_; }
   uint32_t last_error();
   void set_last_error(uint32_t error_code);
   void set_name(const std::string_view name);
@@ -412,6 +413,8 @@ class XThread : public XObject {
   bool guest_thread_ = false;
   bool main_thread_ = false;  // Entry-point thread
   bool running_ = false;
+
+  uint32_t linux_tid_ = 0;  // Linux TID from gettid(), for /proc diagnostics
 
   std::string thread_name_;
   std::unique_ptr<runtime::ThreadState> thread_state_;

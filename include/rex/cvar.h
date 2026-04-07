@@ -235,6 +235,22 @@ inline bool ParseDouble(std::string_view s, double& out) {
   return end != str.c_str() && *end == '\0';
 }
 
+// Locale-independent double -> TOML string. std::to_string uses the current
+// locale's decimal separator (e.g. ',' on German systems) which toml++ rejects.
+inline std::string DoubleToTomlString(double v) {
+  char buf[32];
+  auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), v);
+  if (ec != std::errc{}) return "0.0";
+  std::string s(buf, ptr);
+  // TOML requires a '.' or 'e' to distinguish float literals from integers.
+  if (s.find('.') == std::string::npos && s.find('e') == std::string::npos &&
+      s.find('E') == std::string::npos && s.find('n') == std::string::npos &&
+      s.find('i') == std::string::npos) {
+    s += ".0";
+  }
+  return s;
+}
+
 }  // namespace rex::cvar
 
 //=============================================================================
@@ -377,11 +393,11 @@ inline bool ParseDouble(std::string_view s, double& out) {
                                     FLAGS_##name = val;                          \
                                     return true;                                 \
                                   },                                             \
-                                  []() { return std::to_string(FLAGS_##name); }, \
+                                  []() { return ::rex::cvar::DoubleToTomlString(FLAGS_##name); }, \
                                   []() { return; },                              \
                                   ::rex::cvar::Lifecycle::kHotReload,            \
                                   {},                                            \
-                                  std::to_string(default_val),                   \
+                                  ::rex::cvar::DoubleToTomlString(default_val),  \
                                   false})
 
 #define REXCVAR_DEFINE_STRING(name, default_val, category, desc)                                 \

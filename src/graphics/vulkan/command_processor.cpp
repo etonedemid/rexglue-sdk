@@ -2288,6 +2288,15 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
   vertex_buffers_in_sync_[0] = 0;
   vertex_buffers_in_sync_[1] = 0;
 
+  {
+    static uint32_t swap_count = 0;
+    ++swap_count;
+    if (swap_count <= 5 || (swap_count % 1000 == 0)) {
+      REXGPU_INFO("IssueSwap #{}: frontbuffer_ptr={:#010x} size={}x{}",
+                  swap_count, frontbuffer_ptr, frontbuffer_width, frontbuffer_height);
+    }
+  }
+
   if (!graphics_system_)
     return;
   ui::Presenter* presenter = graphics_system_->presenter();
@@ -2329,7 +2338,11 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
       frontbuffer_width_scaled, frontbuffer_height_scaled, frontbuffer_format,
       &frontbuffer_width_unscaled, &frontbuffer_height_unscaled, &swap_source_needs_rb_swap);
   if (swap_texture_view == VK_NULL_HANDLE) {
-    REXGPU_ERROR("XELOG_GPU PRESENT: swap_texture_view=NULL");
+    static uint32_t null_swap_count = 0;
+    ++null_swap_count;
+    if (null_swap_count <= 5 || (null_swap_count % 1000 == 0)) {
+      REXGPU_ERROR("XELOG_GPU PRESENT: swap_texture_view=NULL (occurrence #{})", null_swap_count);
+    }
     return;
   }
   // The swap gamma / FXAA pass samples source texels by pixel index, but swap
@@ -3607,6 +3620,15 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
   SCOPE_profile_cpu_f("gpu");
 #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
 
+  {
+    static uint32_t draw_count = 0;
+    ++draw_count;
+    if (draw_count <= 3 || (draw_count % 10000 == 0)) {
+      REXGPU_INFO("IssueDraw #{}: prim={} index_count={}", draw_count,
+                  static_cast<uint32_t>(prim_type), index_count);
+    }
+  }
+
   const RegisterFile& regs = *register_file_;
   (void)index_buffer_info;
   auto draw_fail = [&](const char* stage) {
@@ -4179,6 +4201,18 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
     shared_memory_->RangeWrittenByGpu(0, SharedMemory::kBufferSize);
   }
 
+  {
+    static uint32_t memexport_draw_count = 0;
+    bool has_ranges = !memexport_ranges_.empty();
+    bool readback_enabled = IsReadbackMemexportEnabled(REXCVAR_GET(vulkan_readback_memexport));
+    if (has_ranges) {
+      ++memexport_draw_count;
+      if (memexport_draw_count <= 5 || (memexport_draw_count % 10000 == 0)) {
+        REXGPU_INFO("MemexportDraw #{}: ranges={} readback_enabled={} writes_possible={}",
+                    memexport_draw_count, memexport_ranges_.size(), readback_enabled, memexport_writes_possible);
+      }
+    }
+  }
   if (IsReadbackMemexportEnabled(REXCVAR_GET(vulkan_readback_memexport)) &&
       !memexport_ranges_.empty()) {
     uint32_t memexport_total_size = 0;
@@ -4186,6 +4220,15 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
       memexport_total_size += memexport_range.size_bytes;
     }
     if (memexport_total_size) {
+      {
+        static uint32_t memexport_readback_count = 0;
+        ++memexport_readback_count;
+        if (memexport_readback_count <= 5 || (memexport_readback_count % 10000 == 0)) {
+          REXGPU_INFO("MemexportReadback #{}: total_size={} ranges={} fast={}",
+                      memexport_readback_count, memexport_total_size,
+                      memexport_ranges_.size(), REXCVAR_GET(readback_memexport_fast));
+        }
+      }
       if (REXCVAR_GET(readback_memexport_fast)) {
         IssueDraw_MemexportReadbackFastPath(memexport_total_size);
       } else {
@@ -4398,6 +4441,14 @@ bool VulkanCommandProcessor::IssueCopy() {
 #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
   SCOPE_profile_cpu_f("gpu");
 #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+
+  {
+    static uint32_t copy_count = 0;
+    ++copy_count;
+    if (copy_count <= 5 || (copy_count % 1000 == 0)) {
+      REXGPU_INFO("IssueCopy #{}", copy_count);
+    }
+  }
 
   if (!BeginSubmission(true)) {
     return false;

@@ -235,6 +235,17 @@ bool ReXApp::OnInitialize() {
     window_->SetPresenter(presenter);
   }
 
+  // Initialize shader storage cache for persistent pipeline caching.
+  // This loads previously compiled pipeline descriptions from disk and
+  // pre-compiles them asynchronously, avoiding shader compilation stalls
+  // on subsequent runs.
+  if (auto* gs = dynamic_cast<rex::graphics::GraphicsSystem*>(runtime_->graphics_system())) {
+    auto title_id = runtime_->kernel_state()->title_id();
+    if (title_id && !user_data_root_.empty()) {
+      gs->InitializeShaderStorage(user_data_root_, title_id, false);
+    }
+  }
+
   // Launch module in background
   app_context().CallInUIThreadDeferred([this]() {
     OnPreLaunchModule();

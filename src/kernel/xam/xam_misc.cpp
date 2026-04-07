@@ -11,6 +11,11 @@
 #include <rex/kernel/xam/private.h>
 #include <rex/logging.h>
 #include <rex/ppc/function.h>
+#include <rex/ppc/types.h>
+#include <rex/system/kernel_state.h>
+#include <rex/system/xio.h>
+#include <rex/system/xtypes.h>
+#include <rex/thread.h>
 
 // kinda gross but oh well
 XAM_EXPORT_STUB(__imp__CancelWaitableTimer);
@@ -222,7 +227,32 @@ XAM_EXPORT_STUB(__imp__XGSetTextureHeaderEx);
 XAM_EXPORT_STUB(__imp__XGetAudioFlags);
 XAM_EXPORT_STUB(__imp__XGetDisplaySize);
 XAM_EXPORT_STUB(__imp__XGetOverlappedExtendedError);
-XAM_EXPORT_STUB(__imp__XGetOverlappedResult);
+
+namespace rex::kernel::xam {
+
+ppc_u32_result_t XGetOverlappedResult_entry(ppc_pvoid_t overlapped_ptr, ppc_pu32_t result_ptr,
+                                            ppc_u32_t wait) {
+  if (!overlapped_ptr) {
+    return X_ERROR_INVALID_PARAMETER;
+  }
+  auto* ptr = overlapped_ptr.as<void*>();
+
+  if (wait) {
+    while (rex::system::XOverlappedGetResult(ptr) == X_ERROR_IO_PENDING) {
+      rex::thread::Sleep(std::chrono::milliseconds(1));
+    }
+  }
+
+  uint32_t result = rex::system::XOverlappedGetResult(ptr);
+  if (result_ptr) {
+    *result_ptr = rex::system::XOverlappedGetLength(ptr);
+  }
+  return result;
+}
+
+}  // namespace rex::kernel::xam
+
+XAM_EXPORT(__imp__XGetOverlappedResult, rex::kernel::xam::XGetOverlappedResult_entry)
 XAM_EXPORT_STUB(__imp__XGetSSLCertBypassEnabled);
 XAM_EXPORT_STUB(__imp__XMPRegisterCodec);
 XAM_EXPORT_STUB(__imp__XMemAlloc);

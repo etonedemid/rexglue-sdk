@@ -1341,7 +1341,31 @@ bool VulkanRenderTargetCache::Resolve(const memory::Memory& memory,
   if (!draw_util::GetResolveInfo(register_file(), memory, trace_writer_, draw_resolution_scale_x(),
                                  draw_resolution_scale_y(), IsFixedRG16TruncatedToMinus1To1(),
                                  IsFixedRGBA16TruncatedToMinus1To1(), resolve_info)) {
+    static uint32_t resolve_fail_count = 0;
+    ++resolve_fail_count;
+    if (resolve_fail_count <= 5 || (resolve_fail_count % 1000 == 0)) {
+      REXGPU_ERROR("VulkanRenderTargetCache::Resolve: GetResolveInfo failed (occurrence #{})", resolve_fail_count);
+    }
     return false;
+  }
+
+  {
+    static uint32_t resolve_count = 0;
+    static uint32_t frontbuffer_resolve_count = 0;
+    ++resolve_count;
+    bool is_frontbuffer = (resolve_info.copy_dest_base == 0x1f566000 ||
+                           resolve_info.copy_dest_base == 0x1f1ce000);
+    if (is_frontbuffer) ++frontbuffer_resolve_count;
+    if (resolve_count <= 10 || (resolve_count % 5000 == 0) || is_frontbuffer) {
+      REXGPU_INFO("Resolve #{} (fb#{}): copy_dest_base={:#010x} copy_dest_extent_start={:#010x} "
+                  "copy_dest_extent_length={} width={}x8 height={}x8{}",
+                  resolve_count, frontbuffer_resolve_count, resolve_info.copy_dest_base,
+                  resolve_info.copy_dest_extent_start,
+                  resolve_info.copy_dest_extent_length,
+                  uint32_t(resolve_info.coordinate_info.width_div_8),
+                  uint32_t(resolve_info.height_div_8),
+                  is_frontbuffer ? " [FRONTBUFFER]" : "");
+    }
   }
 
   // Nothing to copy/clear.

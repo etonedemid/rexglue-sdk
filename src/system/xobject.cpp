@@ -10,8 +10,11 @@
  */
 
 #include <vector>
+#include <cstdio>
+#include <cstring>
 
 #include <rex/chrono/clock.h>
+#include <rex/logging.h>
 #include <rex/stream.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/util/string_utils.h>  // For TranslateAnsiStringAddress
@@ -211,6 +214,80 @@ X_STATUS XObject::Wait(uint32_t wait_reason, uint32_t processor_mode, uint32_t a
   auto timeout_ms = opt_timeout ? std::chrono::milliseconds(chrono::Clock::ScaleGuestDurationMillis(
                                       TimeoutTicksToMs(*opt_timeout)))
                                 : std::chrono::milliseconds::max();
+
+  // Long-wait diagnostic: for infinite waits, use a 5-second retry loop
+  // so we can detect stuck threads.
+  if (timeout_ms == std::chrono::milliseconds::max()) {
+    for (;;) {
+      auto result = rex::thread::Wait(wait_handle, alertable ? true : false,
+                                       std::chrono::milliseconds(5000));
+      if (result != rex::thread::WaitResult::kTimeout) {
+        switch (result) {
+          case rex::thread::WaitResult::kSuccess:
+            WaitCallback();
+            return X_STATUS_SUCCESS;
+          case rex::thread::WaitResult::kUserCallback:
+            return X_STATUS_USER_APC;
+          default:
+          case rex::thread::WaitResult::kAbandoned:
+          case rex::thread::WaitResult::kFailed:
+            return X_STATUS_ABANDONED_WAIT_0;
+        }
+      }
+      REXSYS_WARN("Long wait (5s+) on object type={} name='{}' handle={:#x}",
+                   static_cast<int>(type()), name(), handle());
+      // Extra detail for specific object types.
+      if (type() == Type::Event) {
+        auto* ev = static_cast<XEvent*>(this);
+        uint32_t ev_type = 0, ev_state = 0;
+        ev->Query(&ev_type, &ev_state);
+        REXSYS_WARN("  -> Event: manual_reset={} signaled={}",
+                     ev_type == 1, ev_state);
+      } else if (type() == Type::Thread) {
+        auto* thr = static_cast<XThread*>(this);
+        REXSYS_WARN("  -> Waiting for guest thread id={}, name='{}', running={}, "
+                     "host_tid={}",
+                     thr->thread_id(), thr->name(),
+                     thr->is_running(),
+                     thr->thread() ? thr->thread()->system_id() : 0);
+#ifdef __linux__
+        // Check OS-level state of the stuck thread via /proc
+        if (thr->linux_tid()) {
+          char path[64];
+          snprintf(path, sizeof(path), "/proc/self/task/%u/wchan", thr->linux_tid());
+          FILE* f = fopen(path, "r");
+          if (f) {
+            char wchan[128] = {};
+            if (fgets(wchan, sizeof(wchan), f)) {
+              // Strip trailing newline
+              size_t len = strlen(wchan);
+              if (len > 0 && wchan[len-1] == '\n') wchan[len-1] = '\0';
+              REXSYS_WARN("  -> linux_tid={}, wchan='{}'",
+                           thr->linux_tid(), wchan);
+            }
+            fclose(f);
+          }
+          snprintf(path, sizeof(path), "/proc/self/task/%u/stat", thr->linux_tid());
+          f = fopen(path, "r");
+          if (f) {
+            char stat_line[512] = {};
+            if (fgets(stat_line, sizeof(stat_line), f)) {
+              // Field 3 is state character (R/S/D/T/Z)
+              char* p = stat_line;
+              // Skip past pid and comm fields
+              p = strchr(p, ')');
+              if (p) {
+                p += 2; // skip ") "
+                REXSYS_WARN("  -> thread state='{}'", *p);
+              }
+            }
+            fclose(f);
+          }
+        }
+#endif
+      }
+    }
+  }
 
   auto result = rex::thread::Wait(wait_handle, alertable ? true : false, timeout_ms);
   switch (result) {

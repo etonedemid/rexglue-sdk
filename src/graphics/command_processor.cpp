@@ -292,12 +292,24 @@ void CommandProcessor::WorkerThreadMain() {
       // event is too high.
       PrepareForWait();
       uint32_t loop_count = 0;
+      auto stall_start = std::chrono::steady_clock::now();
+      bool stall_logged = false;
       do {
         // If we spin around too much, revert to a "low-power" state.
         if (loop_count > 500) {
           const int wait_time_ms = 5;
           rex::thread::Wait(write_ptr_index_event_.get(), true,
                             std::chrono::milliseconds(wait_time_ms));
+          // Log prolonged GPU stalls
+          if (!stall_logged) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - stall_start);
+            if (elapsed.count() >= 5) {
+              REXGPU_WARN("GPU command processor idle for {}s - read_ptr={}, write_ptr={}, pending_fns={}",
+                          elapsed.count(), read_ptr_index_, write_ptr_index_.load(), pending_fns_.size());
+              stall_logged = true;
+            }
+          }
         }
 
         rex::thread::MaybeYield();
@@ -318,8 +330,15 @@ void CommandProcessor::WorkerThreadMain() {
     // TODO(benvanik): use reader->Read_update_freq_ and only issue after moving
     //     that many indices.
     if (read_ptr_writeback_ptr_) {
-      memory::store_and_swap<uint32_t>(memory_->TranslatePhysical(read_ptr_writeback_ptr_),
-                                       read_ptr_index_);
+      auto* host_ptr = memory_->TranslatePhysical(read_ptr_writeback_ptr_);
+      static bool logged_writeback = false;
+      if (!logged_writeback) {
+        REXGPU_INFO("GPU writeback: guest_ptr={:#010x}, masked={:#010x}, host_ptr={:#018x}, writing read_ptr_index_={}",
+                    read_ptr_writeback_ptr_, read_ptr_writeback_ptr_ & 0x1FFFFFFF,
+                    (uintptr_t)host_ptr, read_ptr_index_);
+        logged_writeback = true;
+      }
+      memory::store_and_swap<uint32_t>(host_ptr, read_ptr_index_);
     }
 
     // FIXME: We're supposed to process the WAIT_UNTIL register at this point,
@@ -395,6 +414,8 @@ void CommandProcessor::EnableReadPointerWriteBack(uint32_t ptr, uint32_t block_s
   // CP_RB_RPTR_ADDR Ring Buffer Read Pointer Address 0x70C
   // ptr = RB_RPTR_ADDR, pointer to write back the address to.
   read_ptr_writeback_ptr_ = ptr;
+  REXGPU_INFO("EnableReadPointerWriteBack: ptr={:#010x}, physical_host={:#018x}",
+              ptr, (uintptr_t)memory_->TranslatePhysical(ptr));
   // CP_RB_CNTL Ring Buffer Control 0x704
   // block_size = RB_BLKSZ, log2 of number of quadwords read between updates of
   //              the read pointer.

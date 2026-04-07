@@ -127,7 +127,12 @@ ppc_u32_result_t xeXamContentCreate(ppc_u32_t user_index, ppc_pchar_t root_name,
 
   XCONTENT_AGGREGATE_DATA content_data;
   if (content_data_size == sizeof(XCONTENT_DATA)) {
-    content_data = *content_data_ptr.as<XCONTENT_DATA*>();
+    // Use the converting constructor so that the aggregate-only fields
+    // (xuid, title_id) are properly initialised instead of being left as
+    // indeterminate garbage from the default constructor.  Without this,
+    // ResolvePackagePath may build a bogus path on platforms where the
+    // uninitialised stack bytes differ from Windows (e.g. Linux).
+    content_data = XCONTENT_AGGREGATE_DATA(*content_data_ptr.as<XCONTENT_DATA*>());
   } else if (content_data_size == sizeof(XCONTENT_AGGREGATE_DATA)) {
     content_data = *content_data_ptr.as<XCONTENT_AGGREGATE_DATA*>();
   } else {

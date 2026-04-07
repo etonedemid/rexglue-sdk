@@ -562,21 +562,18 @@ void KernelState::SetExecutableModule(object_ref<UserModule> module) {
       auto global_lock = global_critical_region_.AcquireDeferred();
       while (dispatch_thread_running_) {
         global_lock.lock();
-        if (dispatch_queue_.empty()) {
+        while (dispatch_queue_.empty()) {
           dispatch_cond_.wait(global_lock);
           if (!dispatch_thread_running_) {
             global_lock.unlock();
-            break;
+            return 0;
           }
         }
         auto fn = std::move(dispatch_queue_.front());
         dispatch_queue_.pop_front();
-        REXSYS_DEBUG("Dispatch thread processing queued item ({} remaining)",
-                     dispatch_queue_.size());
         global_lock.unlock();
 
         fn();
-        REXSYS_DEBUG("Dispatch thread completed item");
       }
       return 0;
     }));
@@ -917,7 +914,6 @@ void KernelState::CompleteOverlappedDeferredEx(
     std::move_only_function<X_RESULT(uint32_t&, uint32_t&)> completion_callback,
     uint32_t overlapped_ptr, std::move_only_function<void()> pre_callback,
     std::move_only_function<void()> post_callback) {
-  REXSYS_DEBUG("CompleteOverlappedDeferredEx: queuing for overlapped {:08X}", overlapped_ptr);
   auto ptr = memory()->TranslateVirtual(overlapped_ptr);
   XOverlappedSetResult(ptr, X_ERROR_IO_PENDING);
   XOverlappedSetContext(ptr, XThread::GetCurrentThreadHandle());
@@ -925,21 +921,14 @@ void KernelState::CompleteOverlappedDeferredEx(
   dispatch_queue_.push_back(
       [this, overlapped_ptr, completion_callback = std::move(completion_callback),
        pre_callback = std::move(pre_callback), post_callback = std::move(post_callback)]() mutable {
-        REXSYS_DEBUG("Deferred overlapped {:08X}: running pre_callback", overlapped_ptr);
         if (pre_callback) {
           pre_callback();
         }
-        REXSYS_DEBUG("Deferred overlapped {:08X}: sleeping {}ms", overlapped_ptr,
-                     kDeferredOverlappedDelayMillis);
         rex::thread::Sleep(std::chrono::milliseconds(kDeferredOverlappedDelayMillis));
         uint32_t extended_error, length;
-        REXSYS_DEBUG("Deferred overlapped {:08X}: running completion", overlapped_ptr);
         auto result = completion_callback(extended_error, length);
-        REXSYS_DEBUG("Deferred overlapped {:08X}: completing with result {:08X}", overlapped_ptr,
-                     result);
         CompleteOverlappedEx(overlapped_ptr, result, extended_error, length);
         if (post_callback) {
-          REXSYS_DEBUG("Deferred overlapped {:08X}: running post_callback", overlapped_ptr);
           post_callback();
         }
       });

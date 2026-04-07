@@ -11,7 +11,6 @@
 
 #include <rex/graphics/flags.h>
 #include <rex/logging.h>
-#include <rex/ui/renderdoc_api.h>
 
 REXCVAR_DEFINE_BOOL(gpu_allow_invalid_fetch_constants, false, "GPU",
                     "Allow invalid fetch constants");
@@ -41,12 +40,6 @@ bool IsGpuDebugMarkersEnabled() {
     if (REXCVAR_GET(gpu_debug_markers)) {
       result = true;
       REXLOG_INFO("GPU debug markers enabled via CVar");
-    } else {
-      auto renderdoc_api = rex::ui::RenderDocAPI::CreateIfConnected();
-      if (renderdoc_api) {
-        result = true;
-        REXLOG_INFO("GPU debug markers auto-enabled (RenderDoc detected)");
-      }
     }
   }
   return result;

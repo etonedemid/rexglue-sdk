@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <string>
+#include <utility>
 
 #include <rex/assert.h>
 #include <rex/cvar.h>
@@ -558,6 +559,41 @@ void GTKWindow::ApplyNewMainMenu(MenuItem* old_main_menu) {
 
 void GTKWindow::FocusImpl() {
   gtk_window_activate_focus(GTK_WINDOW(window_));
+}
+
+void GTKWindow::ApplyNewCursorVisibility(CursorVisibility old_cursor_visibility) {
+  if (!window_) return;
+
+  bool hide = (GetCursorVisibility() != CursorVisibility::kVisible &&
+               GetCursorVisibility() != CursorVisibility::kAutoHidden);
+
+  // GTK/GDK functions must only be called from the UI thread.
+  // ApplyNewCursorVisibility can be called from any thread (e.g. the game
+  // thread via InputDriver::GetState → UpdateMouseCapture), so defer the
+  // actual cursor change to the GTK main loop.
+  GtkWidget* win = window_;
+  g_object_ref(win);
+  g_idle_add(
+      [](gpointer data) -> gboolean {
+        auto* info = static_cast<std::pair<GtkWidget*, bool>*>(data);
+        GtkWidget* w = info->first;
+        bool should_hide = info->second;
+        GdkWindow* gdk_win = gtk_widget_get_window(w);
+        if (gdk_win) {
+          if (should_hide) {
+            GdkCursor* blank = gdk_cursor_new_for_display(
+                gtk_widget_get_display(w), GDK_BLANK_CURSOR);
+            gdk_window_set_cursor(gdk_win, blank);
+            g_object_unref(blank);
+          } else {
+            gdk_window_set_cursor(gdk_win, nullptr);
+          }
+        }
+        g_object_unref(w);
+        delete info;
+        return G_SOURCE_REMOVE;
+      },
+      new std::pair<GtkWidget*, bool>(win, hide));
 }
 
 std::unique_ptr<Surface> GTKWindow::CreateSurfaceImpl(Surface::TypeFlags allowed_types) {

@@ -170,6 +170,28 @@ ppc_u32_result_t NtAllocateVirtualMemory_entry(ppc_pu32_t base_addr_ptr, ppc_pu3
   } else {
     bool top_down = !!(alloc_type & X_MEM_TOP_DOWN);
     heap = REX_KERNEL_MEMORY()->LookupHeapByType(false, page_size);
+
+    // Enforce memory budget for v40000000 heap (64KB pages).
+    // On real Xbox 360, all memory shares 512MB physical RAM.
+    // Without this, the game fills the 1008MB virtual heap completely,
+    // leaving no room for streaming buffers.
+    if (page_size == 64 * 1024 && (allocation_type & memory::kMemoryAllocationCommit)) {
+      // Budget: ~320MB for v40000000 regular allocations (5120 pages at 64KB)
+      // System heap (thread stacks) uses top 256MB separately.
+      constexpr uint32_t kMaxCommittedPages = 5120;  // 320 MB
+      uint32_t current_used = heap->total_page_count() - heap->unreserved_page_count();
+      uint32_t requested_pages = adjusted_size / (64 * 1024);
+      if (current_used + requested_pages > kMaxCommittedPages) {
+        static uint32_t budget_reject_count = 0;
+        budget_reject_count++;
+        if (budget_reject_count <= 10 || (budget_reject_count % 1000 == 0)) {
+          REXKRNL_INFO("NtAllocateVirtualMemory: budget reject #{}: used={} requested={} limit={} size={:#x}",
+                       budget_reject_count, current_used, requested_pages, kMaxCommittedPages, adjusted_size);
+        }
+        return X_STATUS_NO_MEMORY;
+      }
+    }
+
     heap->Alloc(adjusted_size, page_size, allocation_type, protect, top_down, &address);
   }
   if (!address) {
@@ -529,10 +551,41 @@ ppc_u32_result_t MmQueryStatistics_entry(ppc_ptr_t<X_MM_QUERY_STATISTICS_RESULT>
                                                 unreserved_pages, reserved_pages, used_pages,
                                                 reserved_pages_bytes);
 
-  assert_true(used_pages < stats_ptr->total_physical_pages);
+  // Also count virtual heap usage against the physical memory budget.
+  // On real Xbox 360, virtual allocations (v40000000) consume physical RAM.
+  // Without this, the game over-allocates virtual memory because it thinks
+  // physical memory is still available, exhausting the v40000000 heap and
+  // leaving no room for the streaming buffer.
+  uint32_t v_used_pages = 0;
+  {
+    uint32_t v_unreserved = 0, v_reserved = 0, v_reserved_bytes = 0;
+    const memory::BaseHeap* virtual_heaps[1] = {
+        REX_KERNEL_MEMORY()->LookupHeapByType(false, 0x10000)};  // v40000000
+    REX_KERNEL_MEMORY()->GetHeapsPageStatsSummary(virtual_heaps, 1,
+                                                  v_unreserved, v_reserved, v_used_pages,
+                                                  v_reserved_bytes);
+    used_pages += v_used_pages;
+  }
 
-  stats_ptr->title.available_pages =
-      stats_ptr->total_physical_pages - stats_ptr->kernel_pages - used_pages;
+  uint32_t phys_used = used_pages - v_used_pages;
+  if (used_pages >= stats_ptr->total_physical_pages - stats_ptr->kernel_pages) {
+    stats_ptr->title.available_pages = 0;
+  } else {
+    stats_ptr->title.available_pages =
+        stats_ptr->total_physical_pages - stats_ptr->kernel_pages - used_pages;
+  }
+
+  // Log every call to track memory pressure signaling
+  {
+    static uint32_t query_count = 0;
+    query_count++;
+    if (query_count <= 20 || (query_count % 100 == 0)) {
+      REXKRNL_INFO("MmQueryStatistics #{}: total={} used={} available={} (phys={} virt={})",
+                   query_count, (uint32_t)stats_ptr->total_physical_pages,
+                   used_pages, (uint32_t)stats_ptr->title.available_pages,
+                   phys_used, v_used_pages);
+    }
+  }
   stats_ptr->title.total_virtual_memory_bytes = 0x2FFE0000;
   stats_ptr->title.reserved_virtual_memory_bytes = reserved_pages_bytes;
   stats_ptr->title.physical_pages = 0x00001000;  // TODO(gibbed): FIXME

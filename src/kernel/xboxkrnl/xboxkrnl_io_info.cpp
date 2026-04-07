@@ -153,7 +153,8 @@ ppc_u32_result_t NtQueryInformationFile_entry(ppc_u32_t file_handle,
     case XFileXctdCompressionInformation: {
       REXKRNL_ERROR(
           "NtQueryInformationFile(XFileXctdCompressionInformation) "
-          "unimplemented");
+          "unimplemented for file: {}",
+          file->path());
       // Files that are XCTD compressed begin with the magic 0x0FF512ED but we
       // shouldn't detect this that way. There's probably a flag somewhere
       // (attributes?) that defines if it's compressed or not.
