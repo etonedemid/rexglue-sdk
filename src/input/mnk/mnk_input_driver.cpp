@@ -58,6 +58,24 @@ REXCVAR_DEFINE_STRING(keybind_back, "Tab", "Input/Keybinds/Controller", "Back bu
 REXCVAR_DEFINE_STRING(keybind_start, "Escape", "Input/Keybinds/Controller", "Start button");
 REXCVAR_DEFINE_STRING(keybind_guide, "", "Input/Keybinds/Controller", "Guide button");
 
+// Alternate mode bindings (e.g. vehicle/cart mode). Empty = same as primary.
+REXCVAR_DEFINE_STRING(keybind_mode_toggle, "", "Input/Keybinds/AltMode",
+                      "Key to toggle alternate binding mode (empty = disabled)");
+REXCVAR_DEFINE_STRING(keybind_alt_a, "", "Input/Keybinds/AltMode", "Alt A button");
+REXCVAR_DEFINE_STRING(keybind_alt_b, "", "Input/Keybinds/AltMode", "Alt B button");
+REXCVAR_DEFINE_STRING(keybind_alt_x, "", "Input/Keybinds/AltMode", "Alt X button");
+REXCVAR_DEFINE_STRING(keybind_alt_y, "", "Input/Keybinds/AltMode", "Alt Y button");
+REXCVAR_DEFINE_STRING(keybind_alt_left_trigger, "", "Input/Keybinds/AltMode", "Alt left trigger");
+REXCVAR_DEFINE_STRING(keybind_alt_right_trigger, "", "Input/Keybinds/AltMode", "Alt right trigger");
+REXCVAR_DEFINE_STRING(keybind_alt_left_shoulder, "", "Input/Keybinds/AltMode", "Alt left shoulder");
+REXCVAR_DEFINE_STRING(keybind_alt_right_shoulder, "", "Input/Keybinds/AltMode", "Alt right shoulder");
+REXCVAR_DEFINE_STRING(keybind_alt_lstick_up, "", "Input/Keybinds/AltMode", "Alt left stick up");
+REXCVAR_DEFINE_STRING(keybind_alt_lstick_down, "", "Input/Keybinds/AltMode", "Alt left stick down");
+REXCVAR_DEFINE_STRING(keybind_alt_lstick_left, "", "Input/Keybinds/AltMode", "Alt left stick left");
+REXCVAR_DEFINE_STRING(keybind_alt_lstick_right, "", "Input/Keybinds/AltMode", "Alt left stick right");
+REXCVAR_DEFINE_STRING(keybind_alt_lstick_press, "", "Input/Keybinds/AltMode", "Alt left stick press");
+REXCVAR_DEFINE_STRING(keybind_alt_rstick_press, "", "Input/Keybinds/AltMode", "Alt right stick press");
+
 namespace rex::input::mnk {
 
 using rex::ui::VirtualKey;
@@ -109,11 +127,49 @@ bool MnkInputDriver::IsEnabled() const {
 }
 
 static bool IsBindPressed(const bool (&key_down)[256], const std::string& cvar_val) {
-  VirtualKey vk = rex::ui::ParseVirtualKey(cvar_val);
-  if (vk == VirtualKey::kNone)
-    return false;
-  uint16_t idx = static_cast<uint16_t>(vk);
-  return idx < 256 && key_down[idx];
+  // Support comma-separated keys (e.g. "Space,Return")
+  std::string::size_type start = 0;
+  while (start < cvar_val.size()) {
+    auto comma = cvar_val.find(',', start);
+    std::string token = cvar_val.substr(start, comma == std::string::npos ? comma : comma - start);
+    // Trim whitespace
+    auto b = token.find_first_not_of(' ');
+    auto e = token.find_last_not_of(' ');
+    if (b != std::string::npos) {
+      token = token.substr(b, e - b + 1);
+    }
+    VirtualKey vk = rex::ui::ParseVirtualKey(token);
+    if (vk != VirtualKey::kNone) {
+      uint16_t idx = static_cast<uint16_t>(vk);
+      if (idx < 256 && key_down[idx]) return true;
+    }
+    if (comma == std::string::npos) break;
+    start = comma + 1;
+  }
+  return false;
+}
+
+// In alt mode, returns the alt binding if it is set (even if empty to disable),
+// or falls back to the primary binding if the alt cvar was never configured.
+// Convention: alt cvar "" = disabled (no bind), alt cvar not present = use primary.
+// Since all alt cvars default to "", we use a sentinel: if the alt string equals
+// the cvar's default (""), it means "not configured" and falls through to primary.
+// To explicitly disable a bind in alt mode, set it to "None".
+static const std::string& PickBind(bool alt_mode, const std::string& primary,
+                                   const std::string& alt) {
+  if (alt_mode && !alt.empty()) return alt;
+  if (alt_mode && alt.empty()) return primary;  // not configured → use primary
+  return primary;
+}
+
+// Like PickBind but treats "None" as an explicit disable (returns empty).
+static const std::string kEmptyBind;
+static const std::string& PickBindOrDisable(bool alt_mode, const std::string& primary,
+                                            const std::string& alt) {
+  if (!alt_mode) return primary;
+  if (alt.empty()) return primary;  // not configured → use primary
+  if (alt == "None" || alt == "none") return kEmptyBind;  // explicitly disabled
+  return alt;
 }
 
 X_RESULT MnkInputDriver::GetCapabilities(uint32_t user_index, uint32_t flags,
@@ -156,22 +212,32 @@ X_RESULT MnkInputDriver::GetState(uint32_t user_index, X_INPUT_STATE* out_state)
 
   std::lock_guard lock(state_mutex_);
 
+  // Handle mode toggle (edge-triggered)
+  const auto& toggle_key = REXCVAR_GET(keybind_mode_toggle);
+  if (!toggle_key.empty()) {
+    bool toggle_pressed = IsBindPressed(key_down_, toggle_key);
+    if (toggle_pressed && !mode_toggle_was_pressed_) {
+      alt_mode_ = !alt_mode_;
+    }
+    mode_toggle_was_pressed_ = toggle_pressed;
+  }
+
   uint16_t buttons = 0;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_a)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_a), REXCVAR_GET(keybind_alt_a))))
     buttons |= X_INPUT_GAMEPAD_A;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_b)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_b), REXCVAR_GET(keybind_alt_b))))
     buttons |= X_INPUT_GAMEPAD_B;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_x)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_x), REXCVAR_GET(keybind_alt_x))))
     buttons |= X_INPUT_GAMEPAD_X;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_y)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_y), REXCVAR_GET(keybind_alt_y))))
     buttons |= X_INPUT_GAMEPAD_Y;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_left_shoulder)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_left_shoulder), REXCVAR_GET(keybind_alt_left_shoulder))))
     buttons |= X_INPUT_GAMEPAD_LEFT_SHOULDER;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_right_shoulder)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_right_shoulder), REXCVAR_GET(keybind_alt_right_shoulder))))
     buttons |= X_INPUT_GAMEPAD_RIGHT_SHOULDER;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_press)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_lstick_press), REXCVAR_GET(keybind_alt_lstick_press))))
     buttons |= X_INPUT_GAMEPAD_LEFT_THUMB;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_rstick_press)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_rstick_press), REXCVAR_GET(keybind_alt_rstick_press))))
     buttons |= X_INPUT_GAMEPAD_RIGHT_THUMB;
   if (IsBindPressed(key_down_, REXCVAR_GET(keybind_back)))
     buttons |= X_INPUT_GAMEPAD_BACK;
@@ -188,18 +254,18 @@ X_RESULT MnkInputDriver::GetState(uint32_t user_index, X_INPUT_STATE* out_state)
   if (IsBindPressed(key_down_, REXCVAR_GET(keybind_dpad_right)))
     buttons |= X_INPUT_GAMEPAD_DPAD_RIGHT;
 
-  uint8_t lt = IsBindPressed(key_down_, REXCVAR_GET(keybind_left_trigger)) ? 0xFF : 0;
-  uint8_t rt = IsBindPressed(key_down_, REXCVAR_GET(keybind_right_trigger)) ? 0xFF : 0;
+  uint8_t lt = IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_left_trigger), REXCVAR_GET(keybind_alt_left_trigger))) ? 0xFF : 0;
+  uint8_t rt = IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_right_trigger), REXCVAR_GET(keybind_alt_right_trigger))) ? 0xFF : 0;
 
   int32_t lx = 0;
   int32_t ly = 0;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_left)))
+  if (IsBindPressed(key_down_, PickBindOrDisable(alt_mode_, REXCVAR_GET(keybind_lstick_left), REXCVAR_GET(keybind_alt_lstick_left))))
     lx -= INT16_MAX;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_right)))
+  if (IsBindPressed(key_down_, PickBindOrDisable(alt_mode_, REXCVAR_GET(keybind_lstick_right), REXCVAR_GET(keybind_alt_lstick_right))))
     lx += INT16_MAX;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_up)))
+  if (IsBindPressed(key_down_, PickBindOrDisable(alt_mode_, REXCVAR_GET(keybind_lstick_up), REXCVAR_GET(keybind_alt_lstick_up))))
     ly += INT16_MAX;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_down)))
+  if (IsBindPressed(key_down_, PickBindOrDisable(alt_mode_, REXCVAR_GET(keybind_lstick_down), REXCVAR_GET(keybind_alt_lstick_down))))
     ly -= INT16_MAX;
 
   double sensitivity = REXCVAR_GET(mnk_sensitivity);

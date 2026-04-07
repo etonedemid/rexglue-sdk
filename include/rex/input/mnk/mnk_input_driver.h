@@ -76,6 +76,10 @@ class MnkInputDriver final : public InputDriver,
 
   // Packet number incremented on state change
   uint32_t packet_number_ = 0;
+
+  // Alternate binding mode (toggled by keybind_mode_toggle)
+  bool alt_mode_ = false;
+  bool mode_toggle_was_pressed_ = false;
 };
 
 }  // namespace rex::input::mnk
