@@ -46,8 +46,14 @@ bool SDLAudioDriver::Initialize() {
   SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_NAME_STRING, "rexglue");
 
   if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
-    REXAPU_ERROR("SDL_InitSubSystem(SDL_INIT_AUDIO) failed: {}", SDL_GetError());
-    return false;
+    REXAPU_WARN("SDL_InitSubSystem(SDL_INIT_AUDIO) failed: {}. Retrying with dummy driver.",
+                SDL_GetError());
+    SDL_setenv_unsafe("SDL_AUDIODRIVER", "dummy", 1);
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+      REXAPU_ERROR("SDL_InitSubSystem(SDL_INIT_AUDIO) failed: {}", SDL_GetError());
+      return false;
+    }
+    REXAPU_WARN("Audio: no physical device available, using dummy (silent) driver");
   }
   sdl_initialized_ = true;
 
