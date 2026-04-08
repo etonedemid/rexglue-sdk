@@ -19,6 +19,10 @@
   </a>
 </h1>
 
+
+# NOTE: This fork of rexglue-sdk is meant to improve [ReNut](https://github.com/masterspike52/reNut) and may introduce regressions in other games. YOU'VE BEEN WARNED
+
+
 ReXGlue converts Xbox 360 PowerPC code into portable C++ that runs natively on modern platforms.
 
 ReXGlue is heavily rooted on the foundations of [Xenia](https://github.com/xenia-project), the Xbox 360 emulator. Rather than interpreting or JIT-compiling PPC instructions at runtime, ReXGlue takes a different path: it generates C++ source code ahead of time, an approach inspired by [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) and [rexdex's recompiler](https://github.com/rexdex/recompiler).
