@@ -21,9 +21,38 @@
 
 // Standard socket types used by Xbox API emulation
 #if REX_PLATFORM_WIN32
-#include <WinSock2.h>
+#include <winsock2.h>
 
-#include <WS2tcpip.h>
+#ifdef IPPROTO_UDP
+#undef IPPROTO_UDP
+#undef IPPROTO_VDP
+#undef IPPROTO_TCP
+#undef IPPROTO_HOPOPTS
+#undef IPPROTO_ICMP
+#undef IPPROTO_IGMP
+#undef IPPROTO_IPV4
+#undef IPPROTO_IPV6
+#undef IPPROTO_ROUTING
+#undef IPPROTO_FRAGMENT
+#undef IPPROTO_ESP
+#undef IPPROTO_AH
+#undef IPPROTO_ICMPV6
+#undef IPPROTO_NONE
+#undef IPPROTO_DSTOPTS
+#undef IPPROTO_ND
+#undef IPPROTO_PGM
+#undef IPPROTO_L2TP
+#undef IPPROTO_SCTP
+#undef IPPROTO_RAW
+#undef IPPROTO_MAX
+#undef IPPROTO_RESERVED_RAW
+#undef IPPROTO_RESERVED_IPSEC
+#undef IPPROTO_RESERVED_IPSECOFFLOAD
+#undef IPPROTO_RESERVED_WNV
+#undef IPPROTO_RESERVED_MAX
+#endif
+
+#include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
 #include <netinet/in.h>

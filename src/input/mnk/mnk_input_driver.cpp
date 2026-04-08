@@ -23,7 +23,7 @@
 
 #if REX_PLATFORM_WIN32
 #include <rex/ui/window_win.h>
-#include <Windows.h>
+#include <windows.h>
 #elif REX_PLATFORM_GNULINUX
 #include <rex/ui/window_gtk.h>
 #include <gdk/gdkx.h>
