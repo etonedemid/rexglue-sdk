@@ -70,12 +70,19 @@ class MnkInputDriver final : public InputDriver,
   int32_t prev_mouse_y_ = 0;
   bool mouse_captured_ = false;
   bool has_focus_ = true;
+#if REX_PLATFORM_GNU_LINUX
+  bool can_warp_pointer_ = false;  // true on X11, false on Wayland
+#endif
 
   // Keystroke queue
   std::queue<X_INPUT_KEYSTROKE> keystroke_queue_;
 
   // Packet number incremented on state change
   uint32_t packet_number_ = 0;
+
+  // Alternate binding mode (toggled by keybind_mode_toggle)
+  bool alt_mode_ = false;
+  bool mode_toggle_was_pressed_ = false;
 };
 
 }  // namespace rex::input::mnk

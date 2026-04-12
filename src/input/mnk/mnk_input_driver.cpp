@@ -23,7 +23,11 @@
 
 #if REX_PLATFORM_WIN32
 #include <rex/ui/window_win.h>
-#include <Windows.h>
+#include <windows.h>
+#elif REX_PLATFORM_GNU_LINUX
+#include <rex/ui/window_gtk.h>
+#include <gdk/gdkx.h>
+#include <X11/Xlib.h>
 #endif
 
 REXCVAR_DEFINE_BOOL(mnk_mode, false, "Input", "Enable keyboard/mouse controller emulation");
@@ -54,9 +58,48 @@ REXCVAR_DEFINE_STRING(keybind_back, "Tab", "Input/Keybinds/Controller", "Back bu
 REXCVAR_DEFINE_STRING(keybind_start, "Escape", "Input/Keybinds/Controller", "Start button");
 REXCVAR_DEFINE_STRING(keybind_guide, "", "Input/Keybinds/Controller", "Guide button");
 
+// Alternate mode bindings (e.g. vehicle/cart mode). Empty = same as primary.
+REXCVAR_DEFINE_STRING(keybind_mode_toggle, "", "Input/Keybinds/AltMode",
+                      "Key to toggle alternate binding mode (empty = disabled)");
+REXCVAR_DEFINE_STRING(keybind_alt_a, "", "Input/Keybinds/AltMode", "Alt A button");
+REXCVAR_DEFINE_STRING(keybind_alt_b, "", "Input/Keybinds/AltMode", "Alt B button");
+REXCVAR_DEFINE_STRING(keybind_alt_x, "", "Input/Keybinds/AltMode", "Alt X button");
+REXCVAR_DEFINE_STRING(keybind_alt_y, "", "Input/Keybinds/AltMode", "Alt Y button");
+REXCVAR_DEFINE_STRING(keybind_alt_left_trigger, "", "Input/Keybinds/AltMode", "Alt left trigger");
+REXCVAR_DEFINE_STRING(keybind_alt_right_trigger, "", "Input/Keybinds/AltMode", "Alt right trigger");
+REXCVAR_DEFINE_STRING(keybind_alt_left_shoulder, "", "Input/Keybinds/AltMode", "Alt left shoulder");
+REXCVAR_DEFINE_STRING(keybind_alt_right_shoulder, "", "Input/Keybinds/AltMode", "Alt right shoulder");
+REXCVAR_DEFINE_STRING(keybind_alt_lstick_up, "", "Input/Keybinds/AltMode", "Alt left stick up");
+REXCVAR_DEFINE_STRING(keybind_alt_lstick_down, "", "Input/Keybinds/AltMode", "Alt left stick down");
+REXCVAR_DEFINE_STRING(keybind_alt_lstick_left, "", "Input/Keybinds/AltMode", "Alt left stick left");
+REXCVAR_DEFINE_STRING(keybind_alt_lstick_right, "", "Input/Keybinds/AltMode", "Alt left stick right");
+REXCVAR_DEFINE_STRING(keybind_alt_lstick_press, "", "Input/Keybinds/AltMode", "Alt left stick press");
+REXCVAR_DEFINE_STRING(keybind_alt_rstick_press, "", "Input/Keybinds/AltMode", "Alt right stick press");
+
+// Auto alt-mode: reads up to 4 big-endian uint32 guest addresses each frame.
+// If a majority are == 1, alt mode is forced on.  Addresses are hex strings
+// (e.g. "0x82FACAC4").  Empty = disabled.
+REXCVAR_DEFINE_STRING(mnk_auto_alt_addr1, "", "Input/AltMode",
+                      "Guest address 1 for auto alt-mode (hex, BE u32, 1 = active)");
+REXCVAR_DEFINE_STRING(mnk_auto_alt_addr2, "", "Input/AltMode",
+                      "Guest address 2 for auto alt-mode (hex, BE u32, 1 = active)");
+REXCVAR_DEFINE_STRING(mnk_auto_alt_addr3, "", "Input/AltMode",
+                      "Guest address 3 for auto alt-mode (hex, BE u32, 1 = active)");
+REXCVAR_DEFINE_STRING(mnk_auto_alt_addr4, "", "Input/AltMode",
+                      "Guest address 4 for auto alt-mode (hex, BE u32, 1 = active)");
+
 namespace rex::input::mnk {
 
 using rex::ui::VirtualKey;
+
+static uint32_t ParseHexAddress(const std::string& s) {
+  if (s.empty()) return 0;
+  try {
+    return static_cast<uint32_t>(std::stoul(s, nullptr, 16));
+  } catch (...) {
+    return 0;
+  }
+}
 
 MnkInputDriver::MnkInputDriver(rex::ui::Window* window, size_t window_z_order)
     : InputDriver(window, window_z_order) {}
@@ -80,6 +123,22 @@ void MnkInputDriver::OnWindowAvailable(rex::ui::Window* window) {
     attached_window_ = window;
     window->AddInputListener(this, window_z_order());
     window->AddListener(this);
+
+#if REX_PLATFORM_GNU_LINUX
+    // Detect whether pointer warping is supported (X11 yes, Wayland no).
+    // GDK_IS_X11_DISPLAY would be ideal but requires GTK headers in rexinput.
+    // Instead check environment: if XDG_SESSION_TYPE is "x11" or
+    // WAYLAND_DISPLAY is unset, we're likely on X11.
+    {
+      const char* session_type = std::getenv("XDG_SESSION_TYPE");
+      const char* wayland_display = std::getenv("WAYLAND_DISPLAY");
+      if (session_type && std::string_view(session_type) == "x11") {
+        can_warp_pointer_ = true;
+      } else if (!wayland_display || wayland_display[0] == '\0') {
+        can_warp_pointer_ = true;  // Assume X11 if no Wayland evidence
+      }
+    }
+#endif
   }
 }
 
@@ -105,11 +164,49 @@ bool MnkInputDriver::IsEnabled() const {
 }
 
 static bool IsBindPressed(const bool (&key_down)[256], const std::string& cvar_val) {
-  VirtualKey vk = rex::ui::ParseVirtualKey(cvar_val);
-  if (vk == VirtualKey::kNone)
-    return false;
-  uint16_t idx = static_cast<uint16_t>(vk);
-  return idx < 256 && key_down[idx];
+  // Support comma-separated keys (e.g. "Space,Return")
+  std::string::size_type start = 0;
+  while (start < cvar_val.size()) {
+    auto comma = cvar_val.find(',', start);
+    std::string token = cvar_val.substr(start, comma == std::string::npos ? comma : comma - start);
+    // Trim whitespace
+    auto b = token.find_first_not_of(' ');
+    auto e = token.find_last_not_of(' ');
+    if (b != std::string::npos) {
+      token = token.substr(b, e - b + 1);
+    }
+    VirtualKey vk = rex::ui::ParseVirtualKey(token);
+    if (vk != VirtualKey::kNone) {
+      uint16_t idx = static_cast<uint16_t>(vk);
+      if (idx < 256 && key_down[idx]) return true;
+    }
+    if (comma == std::string::npos) break;
+    start = comma + 1;
+  }
+  return false;
+}
+
+// In alt mode, returns the alt binding if it is set (even if empty to disable),
+// or falls back to the primary binding if the alt cvar was never configured.
+// Convention: alt cvar "" = disabled (no bind), alt cvar not present = use primary.
+// Since all alt cvars default to "", we use a sentinel: if the alt string equals
+// the cvar's default (""), it means "not configured" and falls through to primary.
+// To explicitly disable a bind in alt mode, set it to "None".
+static const std::string& PickBind(bool alt_mode, const std::string& primary,
+                                   const std::string& alt) {
+  if (alt_mode && !alt.empty()) return alt;
+  if (alt_mode && alt.empty()) return primary;  // not configured → use primary
+  return primary;
+}
+
+// Like PickBind but treats "None" as an explicit disable (returns empty).
+static const std::string kEmptyBind;
+static const std::string& PickBindOrDisable(bool alt_mode, const std::string& primary,
+                                            const std::string& alt) {
+  if (!alt_mode) return primary;
+  if (alt.empty()) return primary;  // not configured → use primary
+  if (alt == "None" || alt == "none") return kEmptyBind;  // explicitly disabled
+  return alt;
 }
 
 X_RESULT MnkInputDriver::GetCapabilities(uint32_t user_index, uint32_t flags,
@@ -152,22 +249,55 @@ X_RESULT MnkInputDriver::GetState(uint32_t user_index, X_INPUT_STATE* out_state)
 
   std::lock_guard lock(state_mutex_);
 
+  // Auto alt-mode from game memory addresses (checked every frame)
+  if (read_guest_u32_) {
+    uint32_t addrs[4] = {
+        ParseHexAddress(REXCVAR_GET(mnk_auto_alt_addr1)),
+        ParseHexAddress(REXCVAR_GET(mnk_auto_alt_addr2)),
+        ParseHexAddress(REXCVAR_GET(mnk_auto_alt_addr3)),
+        ParseHexAddress(REXCVAR_GET(mnk_auto_alt_addr4)),
+    };
+    int configured = 0;
+    int active = 0;
+    for (uint32_t addr : addrs) {
+      if (addr != 0) {
+        configured++;
+        if (read_guest_u32_(addr) == 1) {
+          active++;
+        }
+      }
+    }
+    if (configured > 0) {
+      alt_mode_ = active > configured / 2;  // majority
+    }
+  }
+
+  // Handle mode toggle (edge-triggered) — manual toggle overrides auto
+  const auto& toggle_key = REXCVAR_GET(keybind_mode_toggle);
+  if (!toggle_key.empty()) {
+    bool toggle_pressed = IsBindPressed(key_down_, toggle_key);
+    if (toggle_pressed && !mode_toggle_was_pressed_) {
+      alt_mode_ = !alt_mode_;
+    }
+    mode_toggle_was_pressed_ = toggle_pressed;
+  }
+
   uint16_t buttons = 0;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_a)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_a), REXCVAR_GET(keybind_alt_a))))
     buttons |= X_INPUT_GAMEPAD_A;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_b)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_b), REXCVAR_GET(keybind_alt_b))))
     buttons |= X_INPUT_GAMEPAD_B;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_x)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_x), REXCVAR_GET(keybind_alt_x))))
     buttons |= X_INPUT_GAMEPAD_X;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_y)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_y), REXCVAR_GET(keybind_alt_y))))
     buttons |= X_INPUT_GAMEPAD_Y;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_left_shoulder)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_left_shoulder), REXCVAR_GET(keybind_alt_left_shoulder))))
     buttons |= X_INPUT_GAMEPAD_LEFT_SHOULDER;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_right_shoulder)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_right_shoulder), REXCVAR_GET(keybind_alt_right_shoulder))))
     buttons |= X_INPUT_GAMEPAD_RIGHT_SHOULDER;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_press)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_lstick_press), REXCVAR_GET(keybind_alt_lstick_press))))
     buttons |= X_INPUT_GAMEPAD_LEFT_THUMB;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_rstick_press)))
+  if (IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_rstick_press), REXCVAR_GET(keybind_alt_rstick_press))))
     buttons |= X_INPUT_GAMEPAD_RIGHT_THUMB;
   if (IsBindPressed(key_down_, REXCVAR_GET(keybind_back)))
     buttons |= X_INPUT_GAMEPAD_BACK;
@@ -184,18 +314,18 @@ X_RESULT MnkInputDriver::GetState(uint32_t user_index, X_INPUT_STATE* out_state)
   if (IsBindPressed(key_down_, REXCVAR_GET(keybind_dpad_right)))
     buttons |= X_INPUT_GAMEPAD_DPAD_RIGHT;
 
-  uint8_t lt = IsBindPressed(key_down_, REXCVAR_GET(keybind_left_trigger)) ? 0xFF : 0;
-  uint8_t rt = IsBindPressed(key_down_, REXCVAR_GET(keybind_right_trigger)) ? 0xFF : 0;
+  uint8_t lt = IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_left_trigger), REXCVAR_GET(keybind_alt_left_trigger))) ? 0xFF : 0;
+  uint8_t rt = IsBindPressed(key_down_, PickBind(alt_mode_, REXCVAR_GET(keybind_right_trigger), REXCVAR_GET(keybind_alt_right_trigger))) ? 0xFF : 0;
 
   int32_t lx = 0;
   int32_t ly = 0;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_left)))
+  if (IsBindPressed(key_down_, PickBindOrDisable(alt_mode_, REXCVAR_GET(keybind_lstick_left), REXCVAR_GET(keybind_alt_lstick_left))))
     lx -= INT16_MAX;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_right)))
+  if (IsBindPressed(key_down_, PickBindOrDisable(alt_mode_, REXCVAR_GET(keybind_lstick_right), REXCVAR_GET(keybind_alt_lstick_right))))
     lx += INT16_MAX;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_up)))
+  if (IsBindPressed(key_down_, PickBindOrDisable(alt_mode_, REXCVAR_GET(keybind_lstick_up), REXCVAR_GET(keybind_alt_lstick_up))))
     ly += INT16_MAX;
-  if (IsBindPressed(key_down_, REXCVAR_GET(keybind_lstick_down)))
+  if (IsBindPressed(key_down_, PickBindOrDisable(alt_mode_, REXCVAR_GET(keybind_lstick_down), REXCVAR_GET(keybind_alt_lstick_down))))
     ly -= INT16_MAX;
 
   double sensitivity = REXCVAR_GET(mnk_sensitivity);
@@ -260,11 +390,11 @@ void MnkInputDriver::EnqueueKeystroke(uint16_t vk_pad, bool down) {
 void MnkInputDriver::CenterCursor() {
   if (!attached_window_)
     return;
+#if REX_PLATFORM_WIN32
   int32_t cx = static_cast<int32_t>(attached_window_->GetActualLogicalWidth() / 2);
   int32_t cy = static_cast<int32_t>(attached_window_->GetActualLogicalHeight() / 2);
   prev_mouse_x_ = cx;
   prev_mouse_y_ = cy;
-#if REX_PLATFORM_WIN32
   auto* win32_window = dynamic_cast<rex::ui::Win32Window*>(attached_window_);
   if (win32_window && win32_window->hwnd()) {
     POINT pt = {static_cast<LONG>(cx), static_cast<LONG>(cy)};
@@ -272,6 +402,10 @@ void MnkInputDriver::CenterCursor() {
     SetCursorPos(pt.x, pt.y);
   }
 #endif
+  // On Linux, cursor warping is done from OnMouseMove (UI thread) to avoid
+  // X11 threading deadlocks.  prev_mouse coords are NOT updated here
+  // because the warp may not actually occur (e.g. Wayland) and touching
+  // prev_mouse without the lock is a data race.
 }
 
 void MnkInputDriver::UpdateMouseCapture() {
@@ -362,13 +496,52 @@ void MnkInputDriver::OnMouseUp(rex::ui::MouseEvent& e) {
 void MnkInputDriver::OnMouseMove(rex::ui::MouseEvent& e) {
   if (!IsEnabled() || !has_focus_)
     return;
-  std::lock_guard lock(state_mutex_);
-  int32_t x = e.x();
-  int32_t y = e.y();
-  mouse_dx_ += x - prev_mouse_x_;
-  mouse_dy_ += y - prev_mouse_y_;
-  prev_mouse_x_ = x;
-  prev_mouse_y_ = y;
+
+#if REX_PLATFORM_GNU_LINUX
+  bool do_warp = false;
+  int32_t warp_x = 0, warp_y = 0;
+#endif
+
+  {
+    std::lock_guard lock(state_mutex_);
+    int32_t x = e.x();
+    int32_t y = e.y();
+    mouse_dx_ += x - prev_mouse_x_;
+    mouse_dy_ += y - prev_mouse_y_;
+    prev_mouse_x_ = x;
+    prev_mouse_y_ = y;
+
+#if REX_PLATFORM_GNU_LINUX
+    // On X11, warp the cursor back to center from the UI thread to avoid
+    // threading deadlocks.  On Wayland warping is not possible, so we just
+    // track raw deltas (prev_mouse follows the real cursor position).
+    if (mouse_captured_ && attached_window_ && can_warp_pointer_) {
+      warp_x = static_cast<int32_t>(attached_window_->GetActualLogicalWidth() / 2);
+      warp_y = static_cast<int32_t>(attached_window_->GetActualLogicalHeight() / 2);
+      if (x != warp_x || y != warp_y) {
+        prev_mouse_x_ = warp_x;
+        prev_mouse_y_ = warp_y;
+        do_warp = true;
+      }
+    }
+#endif
+  }
+
+#if REX_PLATFORM_GNU_LINUX
+  if (do_warp) {
+    auto* gtk_window = dynamic_cast<rex::ui::GTKWindow*>(attached_window_);
+    if (gtk_window && gtk_window->window()) {
+      GdkDisplay* display = gtk_widget_get_display(gtk_window->window());
+      if (GDK_IS_X11_DISPLAY(display)) {
+        Display* xdisplay = gdk_x11_display_get_xdisplay(display);
+        GdkWindow* gdk_win = gtk_widget_get_window(gtk_window->window());
+        Window xwindow = gdk_x11_window_get_xid(gdk_win);
+        XWarpPointer(xdisplay, None, xwindow, 0, 0, 0, 0, warp_x, warp_y);
+        XFlush(xdisplay);
+      }
+    }
+  }
+#endif
 }
 
 void MnkInputDriver::OnLostFocus(rex::ui::UISetupEvent&) {
