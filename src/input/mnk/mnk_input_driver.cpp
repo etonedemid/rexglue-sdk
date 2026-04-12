@@ -26,8 +26,10 @@
 #include <windows.h>
 #elif REX_PLATFORM_GNU_LINUX
 #include <rex/ui/window_gtk.h>
+#ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #include <X11/Xlib.h>
+#endif
 #endif
 
 REXCVAR_DEFINE_BOOL(mnk_mode, false, "Input", "Enable keyboard/mouse controller emulation");
