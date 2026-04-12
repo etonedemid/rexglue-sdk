@@ -28,8 +28,10 @@ set(REXSYSTEM_SOURCES
     util/gameinfo_utils.cpp
 
     # XAM services
+    xam/achievement_manager.cpp
     xam/app_manager.cpp
     xam/content_manager.cpp
+    xam/ra_client.cpp
     xam/user_profile.cpp
 
     # Formerly rexruntime: module loading, CPU execution, thread state
@@ -50,6 +52,8 @@ set(REXSYSTEM_SOURCES
 add_library(rexsystem STATIC ${REXSYSTEM_SOURCES})
 add_library(rex::system ALIAS rexsystem)
 
+find_package(CURL REQUIRED)
+
 target_include_directories(rexsystem PUBLIC
     $<BUILD_INTERFACE:${REXGLUE_ROOT}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -66,6 +70,8 @@ target_link_libraries(rexsystem
     PRIVATE
         aes128
         mspack
+        rcheevos::rcheevos
+        CURL::libcurl
 )
 
 if(WIN32)

@@ -32,6 +32,7 @@
 #include <rex/system/xnotifylistener.h>
 #include <rex/system/xobject.h>
 #include <rex/system/xthread.h>
+#include <rex/system/xam/ra_client.h>
 
 namespace rex::system {
 
@@ -63,6 +64,9 @@ KernelState::KernelState(Runtime* emulator)
     user_data_root = std::filesystem::absolute(user_data_root);
   }
   content_manager_ = std::make_unique<xam::ContentManager>(this, user_data_root);
+  achievement_manager_ = std::make_unique<xam::AchievementManager>(this);
+  ra_client_ = std::make_unique<xam::RAClient>(emulator_, achievement_manager_.get(),
+                                               user_data_root);
 
   if (shared_kernel_state_ != nullptr) {
     REXSYS_ERROR("KernelState constructed but shared_kernel_state_ already set");
@@ -551,6 +555,16 @@ void KernelState::SetExecutableModule(object_ref<UserModule> module) {
     char* variable_ptr = memory_->TranslateVirtual<char*>(export_entry->variable_ptr);
     rex::string::util_copy_truncating(variable_ptr, executable_module_->path(),
                                       kExLoadedImageNameSize);
+  }
+
+  // Load achievement definitions now that the title XDBF is available.
+  if (achievement_manager_) {
+    achievement_manager_->LoadTitleAchievements();
+  }
+
+  // Kick off RetroAchievements game identification.
+  if (ra_client_) {
+    ra_client_->LoadGame(executable_module_->path(), title_id());
   }
 
   // Spin up deferred dispatch worker.

@@ -34,6 +34,7 @@
 #include <rex/stream.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
+#include <rex/system/xam/ra_client.h>
 
 REXCVAR_DEFINE_BOOL(vsync, true, "GPU", "Enable vertical sync");
 
@@ -1175,6 +1176,11 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(memory::RingBuffer* reader, ui
   reader->AdvanceRead((count - 4) * sizeof(uint32_t));
 
   IssueSwap(frontbuffer_ptr, frontbuffer_width, frontbuffer_height);
+
+  // Tick RetroAchievements frame processing (memory checks, leaderboard updates, etc.)
+  if (auto* ra = kernel_state_->ra_client()) {
+    ra->DoFrame();
+  }
 
   ++counter_;
   return true;

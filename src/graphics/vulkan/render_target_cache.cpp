@@ -256,6 +256,11 @@ bool VulkanRenderTargetCache::Initialize(uint32_t shared_memory_binding_count) {
                                           &depth_unorm24_properties);
   depth_unorm24_vulkan_format_supported_ = (depth_unorm24_properties.optimalTilingFeatures &
                                             kUsedDepthFormatFeatures) == kUsedDepthFormatFeatures;
+  if (!depth_unorm24_vulkan_format_supported_) {
+    REXGPU_WARN(
+        "VulkanRenderTargetCache: D24_UNORM_S8_UINT unavailable; "
+        "falling back to D32_SFLOAT_S8_UINT — depth precision will differ from Xbox 360");
+  }
   VkFormatProperties color_rg16_snorm_properties;
   ifn.vkGetPhysicalDeviceFormatProperties(physical_device, VK_FORMAT_R16G16_SNORM,
                                           &color_rg16_snorm_properties);
@@ -1352,24 +1357,7 @@ bool VulkanRenderTargetCache::Resolve(const memory::Memory& memory,
     return false;
   }
 
-  {
-    static uint32_t resolve_count = 0;
-    static uint32_t frontbuffer_resolve_count = 0;
-    ++resolve_count;
-    bool is_frontbuffer = (resolve_info.copy_dest_base == 0x1f566000 ||
-                           resolve_info.copy_dest_base == 0x1f1ce000);
-    if (is_frontbuffer) ++frontbuffer_resolve_count;
-    if (resolve_count <= 10 || (resolve_count % 5000 == 0) || is_frontbuffer) {
-      REXGPU_INFO("Resolve #{} (fb#{}): copy_dest_base={:#010x} copy_dest_extent_start={:#010x} "
-                  "copy_dest_extent_length={} width={}x8 height={}x8{}",
-                  resolve_count, frontbuffer_resolve_count, resolve_info.copy_dest_base,
-                  resolve_info.copy_dest_extent_start,
-                  resolve_info.copy_dest_extent_length,
-                  uint32_t(resolve_info.coordinate_info.width_div_8),
-                  uint32_t(resolve_info.height_div_8),
-                  is_frontbuffer ? " [FRONTBUFFER]" : "");
-    }
-  }
+  // Resolve logging removed — was spamming.
 
   // Nothing to copy/clear.
   if (!resolve_info.coordinate_info.width_div_8 || !resolve_info.height_div_8) {
@@ -1961,7 +1949,7 @@ VkFormat VulkanRenderTargetCache::GetColorVulkanFormat(
                                              : VK_FORMAT_R8G8B8A8_UNORM;
     case xenos::ColorRenderTargetFormat::k_2_10_10_10:
     case xenos::ColorRenderTargetFormat::k_2_10_10_10_AS_10_10_10_10:
-      return VK_FORMAT_A8B8G8R8_UNORM_PACK32;
+      return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
     case xenos::ColorRenderTargetFormat::k_2_10_10_10_FLOAT:
     case xenos::ColorRenderTargetFormat::k_2_10_10_10_FLOAT_AS_16_16_16_16:
       return VK_FORMAT_R16G16B16A16_SFLOAT;

@@ -44,6 +44,9 @@ class InputDriver {
     is_active_callback_ = is_active_callback;
   }
 
+  using MemoryReadU32Fn = std::function<uint32_t(uint32_t)>;
+  void set_memory_read_u32(MemoryReadU32Fn fn) { read_guest_u32_ = std::move(fn); }
+
  protected:
   explicit InputDriver(rex::ui::Window* window, size_t window_z_order)
       : window_(window), window_z_order_(window_z_order) {}
@@ -52,6 +55,8 @@ class InputDriver {
   size_t window_z_order() const { return window_z_order_; }
 
   bool is_active() const { return !is_active_callback_ || is_active_callback_(); }
+
+  MemoryReadU32Fn read_guest_u32_ = nullptr;
 
  private:
   rex::ui::Window* window_;

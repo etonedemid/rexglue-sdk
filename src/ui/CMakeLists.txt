@@ -2,6 +2,7 @@
 
 # Core UI sources
 set(REXUI_CORE_SOURCES
+    achievement_toast.cpp
     graphics_upload_buffer_pool.cpp
     graphics_util.cpp
     imgui_dialog.cpp

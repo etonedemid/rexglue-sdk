@@ -561,6 +561,45 @@ void GTKWindow::FocusImpl() {
   gtk_window_activate_focus(GTK_WINDOW(window_));
 }
 
+void GTKWindow::ApplyNewMouseCapture() {
+  if (!window_) return;
+  GtkWidget* win = window_;
+  g_object_ref(win);
+  g_idle_add(
+      [](gpointer data) -> gboolean {
+        GtkWidget* w = static_cast<GtkWidget*>(data);
+        GdkWindow* gdk_win = gtk_widget_get_window(w);
+        if (gdk_win) {
+          GdkDisplay* display = gtk_widget_get_display(w);
+          GdkSeat* seat = gdk_display_get_default_seat(display);
+          GdkCursor* blank =
+              gdk_cursor_new_for_display(display, GDK_BLANK_CURSOR);
+          gdk_seat_grab(seat, gdk_win, GDK_SEAT_CAPABILITY_POINTER,
+                        TRUE, blank, NULL, NULL, NULL);
+          g_object_unref(blank);
+        }
+        g_object_unref(w);
+        return G_SOURCE_REMOVE;
+      },
+      win);
+}
+
+void GTKWindow::ApplyNewMouseRelease() {
+  if (!window_) return;
+  GtkWidget* win = window_;
+  g_object_ref(win);
+  g_idle_add(
+      [](gpointer data) -> gboolean {
+        GtkWidget* w = static_cast<GtkWidget*>(data);
+        GdkDisplay* display = gtk_widget_get_display(w);
+        GdkSeat* seat = gdk_display_get_default_seat(display);
+        gdk_seat_ungrab(seat);
+        g_object_unref(w);
+        return G_SOURCE_REMOVE;
+      },
+      win);
+}
+
 void GTKWindow::ApplyNewCursorVisibility(CursorVisibility old_cursor_visibility) {
   if (!window_) return;
 

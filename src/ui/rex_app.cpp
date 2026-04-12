@@ -229,6 +229,16 @@ bool ReXApp::OnInitialize() {
         auto* input_sys = static_cast<rex::input::InputSystem*>(runtime_->input_system());
         if (input_sys) {
           input_sys->SetActiveCallback([]() { return !ImGui::GetIO().WantCaptureMouse; });
+
+          // Provide guest memory read callback for memory-based auto alt-mode.
+          auto* mem = runtime_->memory();
+          if (mem) {
+            input_sys->SetMemoryReadCallback(
+                [mem](uint32_t addr) -> uint32_t {
+                  auto* ptr = mem->TranslateVirtual<uint32_t*>(addr);
+                  return rex::byte_swap(*ptr);
+                });
+          }
         }
       }
     }

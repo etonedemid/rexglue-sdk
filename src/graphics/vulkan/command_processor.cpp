@@ -2292,7 +2292,7 @@ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontb
   {
     static uint32_t swap_count = 0;
     ++swap_count;
-    if (swap_count <= 5 || (swap_count % 1000 == 0)) {
+    if (swap_count <= 5) {
       REXGPU_INFO("IssueSwap #{}: frontbuffer_ptr={:#010x} size={}x{}",
                   swap_count, frontbuffer_ptr, frontbuffer_width, frontbuffer_height);
     }
@@ -3629,14 +3629,7 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
   SCOPE_profile_cpu_f("gpu");
 #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
 
-  {
-    static uint32_t draw_count = 0;
-    ++draw_count;
-    if (draw_count <= 3 || (draw_count % 10000 == 0)) {
-      REXGPU_INFO("IssueDraw #{}: prim={} index_count={}", draw_count,
-                  static_cast<uint32_t>(prim_type), index_count);
-    }
-  }
+  // IssueDraw logging removed — was spamming.
 
   const RegisterFile& regs = *register_file_;
   (void)index_buffer_info;
