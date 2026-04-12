@@ -2,6 +2,7 @@
 
 # Core UI sources
 set(REXUI_CORE_SOURCES
+    achievement_toast.cpp
     graphics_upload_buffer_pool.cpp
     graphics_util.cpp
     imgui_dialog.cpp
@@ -10,7 +11,6 @@ set(REXUI_CORE_SOURCES
     keybinds.cpp
     menu_item.cpp
     presenter.cpp
-    renderdoc_api.cpp
     window.cpp
     windowed_app.cpp
     windowed_app_context.cpp
@@ -97,7 +97,6 @@ target_include_directories(rexui PRIVATE
 
 target_link_libraries(rexui PUBLIC
     rexcore
-    renderdoc
     imgui::imgui
 )
 
@@ -127,6 +126,7 @@ if(REXGLUE_USE_VULKAN)
         volk::volk
         GPUOpen::VulkanMemoryAllocator
         SPIRV-Tools-static
+        SPIRV-Tools-opt
     )
 endif()
 
@@ -134,7 +134,7 @@ endif()
 if(WIN32)
     target_link_libraries(rexui PUBLIC
         dwmapi
-        Shcore
+        shcore
     )
 else()
     find_package(PkgConfig REQUIRED)

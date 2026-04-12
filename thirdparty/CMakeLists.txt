@@ -619,3 +619,41 @@ endif()
 
 # IDE folder organization
 set_target_properties(libavutil libavcodec PROPERTIES FOLDER "FFmpeg")
+
+#=============================================================================
+# rcheevos - RetroAchievements client library
+# Fetched via CMake FetchContent; not a git submodule.
+#=============================================================================
+include(FetchContent)
+FetchContent_Declare(
+    rcheevos
+    GIT_REPOSITORY https://github.com/RetroAchievements/rcheevos.git
+    GIT_TAG        v11.6.0
+    GIT_SHALLOW    TRUE
+    GIT_SUBMODULES ""
+)
+FetchContent_GetProperties(rcheevos)
+if(NOT rcheevos_POPULATED)
+    # Use the old-style Populate to download sources WITHOUT running rcheevos's
+    # own CMakeLists.txt (which may define conflicting targets or install rules).
+    cmake_policy(PUSH)
+    cmake_policy(SET CMP0169 OLD)
+    FetchContent_Populate(rcheevos)
+    cmake_policy(POP)
+endif()
+
+file(GLOB_RECURSE RCHEEVOS_C_SOURCES "${rcheevos_SOURCE_DIR}/src/*.c")
+# rc_libretro.c requires libretro.h which we don't provide — exclude it.
+list(REMOVE_ITEM RCHEEVOS_C_SOURCES "${rcheevos_SOURCE_DIR}/src/rc_libretro.c")
+add_library(rcheevos STATIC ${RCHEEVOS_C_SOURCES})
+add_library(rcheevos::rcheevos ALIAS rcheevos)
+target_include_directories(rcheevos PUBLIC
+    $<BUILD_INTERFACE:${rcheevos_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+# Enable hash-based game identification (required for rc_client_begin_identify_and_load_game)
+target_compile_definitions(rcheevos PUBLIC RC_CLIENT_SUPPORTS_HASH RC_DISABLE_LUA)
+target_compile_options(rcheevos PRIVATE -w)
+
+# Export rcheevos_SOURCE_DIR so the install rules can find the headers.
+set(RCHEEVOS_INCLUDE_DIR "${rcheevos_SOURCE_DIR}/include" CACHE INTERNAL "" FORCE)

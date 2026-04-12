@@ -22,6 +22,7 @@
 #include <rex/ppc/types.h>
 #include <rex/string/util.h>
 #include <rex/system/kernel_state.h>
+#include <rex/system/xam/achievement_manager.h>
 #include <rex/system/xam/user_profile.h>
 #include <rex/system/xenumerator.h>
 #include <rex/system/xio.h>
@@ -644,8 +645,23 @@ ppc_u32_result_t XamUserCreateAchievementEnumerator_entry(ppc_u32_t title_id, pp
     const XLanguage language =
         db.GetExistingLanguage(static_cast<XLanguage>(REXCVAR_GET(user_language)));
     const std::vector<util::XdbfAchievementTableEntry> achievement_list = db.GetAchievements();
+    auto* achievement_manager = REX_KERNEL_STATE()->achievement_manager();
 
     for (const util::XdbfAchievementTableEntry& entry : achievement_list) {
+      uint32_t achievement_flags = entry.flags;
+      uint32_t unlock_time_lo = 0;
+      uint32_t unlock_time_hi = 0;
+
+      // Check if the achievement has been unlocked
+      if (achievement_manager && achievement_manager->IsUnlocked(entry.id)) {
+        // XACHIEVEMENT_DETAILS_ACHIEVED_ONLINE = 0x10000
+        // XACHIEVEMENT_DETAILS_ACHIEVED = 0x20000
+        achievement_flags |= 0x30000;
+        uint64_t ft = achievement_manager->GetUnlockTime(entry.id);
+        unlock_time_lo = static_cast<uint32_t>(ft & 0xFFFFFFFF);
+        unlock_time_hi = static_cast<uint32_t>(ft >> 32);
+      }
+
       auto item = XStaticAchievementEnumerator::AchievementDetails{
           entry.id,
           rex::string::to_utf16(db.GetStringTableEntry(language, entry.label_id)),
@@ -653,8 +669,8 @@ ppc_u32_result_t XamUserCreateAchievementEnumerator_entry(ppc_u32_t title_id, pp
           rex::string::to_utf16(db.GetStringTableEntry(language, entry.unachieved_id)),
           entry.image_id,
           entry.gamerscore,
-          {0, 0},
-          entry.flags};
+          {unlock_time_lo, unlock_time_hi},
+          achievement_flags};
 
       e->AppendItem(item);
     }
