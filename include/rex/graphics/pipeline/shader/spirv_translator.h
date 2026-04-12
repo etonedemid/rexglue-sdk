@@ -22,6 +22,14 @@
 #include <rex/graphics/xenos.h>
 #include <rex/ui/vulkan/device.h>
 
+namespace rex {
+namespace ui {
+namespace vulkan {
+class SpirvToolsContext;
+}  // namespace vulkan
+}  // namespace ui
+}  // namespace rex
+
 namespace rex::graphics {
 
 class SpirvShaderTranslator : public ShaderTranslator {
@@ -88,6 +96,11 @@ class SpirvShaderTranslator : public ShaderTranslator {
       uint32_t param_gen_point : 1;
       // For host render targets - depth / stencil output mode.
       DepthStencilMode depth_stencil_mode : 3;
+      // For host render targets - which color render targets are actually
+      // bound.
+      uint32_t color_targets_used : xenos::kMaxColorRenderTargets;
+      // Whether to use manual barycentric interpolation for precision.
+      uint32_t precise_interpolation : 1;
     } pixel;
     uint64_t value = 0;
 
@@ -399,17 +412,25 @@ class SpirvShaderTranslator : public ShaderTranslator {
 
     bool demote_to_helper_invocation;
     bool sample_rate_shading;
+
+    bool fragment_shader_barycentric;
   };
 
-  SpirvShaderTranslator(const Features& features, bool native_2x_msaa_with_attachments,
-                        bool native_2x_msaa_no_attachments, bool edram_fragment_shader_interlock,
-                        uint32_t draw_resolution_scale_x = 1, uint32_t draw_resolution_scale_y = 1)
+  SpirvShaderTranslator(
+      const Features& features, bool native_2x_msaa_with_attachments,
+      bool native_2x_msaa_no_attachments, bool edram_fragment_shader_interlock,
+      uint32_t draw_resolution_scale_x = 1,
+      uint32_t draw_resolution_scale_y = 1,
+      ui::vulkan::SpirvToolsContext* spirv_tools_context = nullptr,
+      bool spirv_optimize = true)
       : features_(features),
         native_2x_msaa_with_attachments_(native_2x_msaa_with_attachments),
         native_2x_msaa_no_attachments_(native_2x_msaa_no_attachments),
         edram_fragment_shader_interlock_(edram_fragment_shader_interlock),
         draw_resolution_scale_x_(draw_resolution_scale_x ? draw_resolution_scale_x : 1),
-        draw_resolution_scale_y_(draw_resolution_scale_y ? draw_resolution_scale_y : 1) {}
+        draw_resolution_scale_y_(draw_resolution_scale_y ? draw_resolution_scale_y : 1),
+        spirv_tools_context_(spirv_tools_context),
+        spirv_optimize_(spirv_optimize) {}
 
   uint64_t GetDefaultVertexShaderModification(
       uint32_t dynamic_addressable_register_count,
@@ -636,6 +657,11 @@ class SpirvShaderTranslator : public ShaderTranslator {
   // replaces the value with +0 if the minimum of the two operands is 0. This
   // must be called with absolute values of operands - use GetAbsoluteOperand!
   spv::Id ZeroIfAnyOperandIsZero(spv::Id value, spv::Id operand_0_abs, spv::Id operand_1_abs);
+  // Reduces floating-point precision by truncating mantissa bits with rounding.
+  // Used to match Xbox 360 Xenos GPU hardware approximation instructions
+  // (RCP, RSQ, EXP, LOG, SQRT) that provide ~2^-21 relative error tolerance
+  // instead of full IEEE-754 precision (equivalent to 21 vs 23 mantissa bits).
+  spv::Id ReduceFloatPrecision(spv::Id value, uint32_t mantissa_bits);
   // Conditionally discard the current fragment. Changes the build point.
   void KillPixel(spv::Id condition, uint8_t memexport_eM_potentially_written_before);
   // Return type is a rex::bit_count(result.GetUsedResultComponents())-component
@@ -758,6 +784,8 @@ class SpirvShaderTranslator : public ShaderTranslator {
   bool edram_fragment_shader_interlock_;
   uint32_t draw_resolution_scale_x_;
   uint32_t draw_resolution_scale_y_;
+  ui::vulkan::SpirvToolsContext* spirv_tools_context_;
+  bool spirv_optimize_;
 
   // Is currently writing the empty depth-only pixel shader, such as for depth
   // and stencil testing with fragment shader interlock.
@@ -913,6 +941,16 @@ class SpirvShaderTranslator : public ShaderTranslator {
   spv::Id input_sample_id_;
   // PS, only when needed - int[1].
   spv::Id input_sample_mask_;
+
+  // PS, barycentric coordinate inputs (when fragment_shader_barycentric is
+  // enabled) - float3.
+  spv::Id input_barycentric_coord_;
+  spv::Id input_barycentric_coord_no_persp_;
+
+  // PS, per-vertex interpolator arrays for barycentric interpolation (when
+  // fragment_shader_barycentric is enabled). Stores the array variable
+  // (float4[3]) for each interpolator.
+  std::array<spv::Id, xenos::kMaxInterpolators> input_interpolators_per_vertex_;
 
   // VS output or PS input, only the ones that are needed (spv::NoResult for the
   // unneeded interpolators), indexed by the guest interpolator index - float4.

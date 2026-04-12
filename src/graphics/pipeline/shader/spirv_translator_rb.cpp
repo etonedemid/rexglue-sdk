@@ -503,10 +503,16 @@ void SpirvShaderTranslator::CompleteFragmentShaderInMain() {
     {
       id_vector_temp_.clear();
       id_vector_temp_.push_back(builder_->makeIntConstant(3));
+      // The RT0 variable is Function-scope in FSI mode, or when non-FSI but
+      // RT0 is not bound (fallback for alpha test with a zero color mask).
+      spv::StorageClass rt0_var_sc =
+          (edram_fragment_shader_interlock_ ||
+           !(GetSpirvShaderModification().pixel.color_targets_used & 1))
+              ? spv::StorageClassFunction
+              : spv::StorageClassOutput;
       spv::Id alpha_test_alpha = builder_->createLoad(
-          builder_->createAccessChain(edram_fragment_shader_interlock_ ? spv::StorageClassFunction
-                                                                       : spv::StorageClassOutput,
-                                      output_or_var_fragment_data_[0], id_vector_temp_),
+          builder_->createAccessChain(rt0_var_sc, output_or_var_fragment_data_[0],
+                                      id_vector_temp_),
           spv::NoPrecision);
       id_vector_temp_.clear();
       id_vector_temp_.push_back(builder_->makeIntConstant(kSystemConstantAlphaTestReference));
@@ -604,10 +610,14 @@ void SpirvShaderTranslator::CompleteFragmentShaderInMain() {
         }
         id_vector_temp_.clear();
         id_vector_temp_.push_back(builder_->makeIntConstant(3));
+        spv::StorageClass rt0_var_sc_a2c =
+            (edram_fragment_shader_interlock_ ||
+             !(GetSpirvShaderModification().pixel.color_targets_used & 1))
+                ? spv::StorageClassFunction
+                : spv::StorageClassOutput;
         spv::Id alpha_to_coverage_alpha = builder_->createLoad(
-            builder_->createAccessChain(edram_fragment_shader_interlock_ ? spv::StorageClassFunction
-                                                                         : spv::StorageClassOutput,
-                                        output_or_var_fragment_data_[0], id_vector_temp_),
+            builder_->createAccessChain(rt0_var_sc_a2c, output_or_var_fragment_data_[0],
+                                        id_vector_temp_),
             spv::NoPrecision);
         assert_true(input_fragment_coordinates_ != spv::NoResult);
         spv::Id const_uint_1 = builder_->makeUintConstant(1);
@@ -916,6 +926,13 @@ void SpirvShaderTranslator::CompleteFragmentShaderInMain() {
       }
     }
     uint32_t color_targets_remaining = color_targets_written;
+    if (!edram_fragment_shader_interlock_) {
+      // In non-FSI mode, output variables were only created for targets that
+      // are both written by the shader and used (bound) in the render pass.
+      // Mask to avoid createLoad on an uninitialized (spv::NoResult) variable.
+      color_targets_remaining &=
+          GetSpirvShaderModification().pixel.color_targets_used;
+    }
     uint32_t color_target_index;
     while (rex::bit_scan_forward(color_targets_remaining, &color_target_index)) {
       color_targets_remaining &= ~(UINT32_C(1) << color_target_index);

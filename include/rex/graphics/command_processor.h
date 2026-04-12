@@ -23,6 +23,7 @@
 
 #include <rex/graphics/register_file.h>
 #include <rex/graphics/registers.h>
+#include <rex/graphics/xenos_zpd_report.h>
 #include <rex/graphics/trace_writer.h>
 #include <rex/graphics/xenos.h>
 #include <rex/memory.h>
@@ -46,6 +47,33 @@ enum class ReadbackResolveMode {
   kSome,
   kFull,
 };
+
+// Occlusion queries - ZPD report mode.
+enum class ZPDMode {
+  kFake,    // Fake sample counts, no real GPU queries (fake)
+  kFast,    // Real queries with speculative cached writes (fast)
+  kStrict,  // Real queries, waits before writeback. May hang. (strict)
+};
+
+// Shared pool capacity for D3D12 and Vulkan.
+constexpr uint32_t kZPDQueryPoolCapacity = 8192;
+
+// Contiguous range of query indices for batched resolve/copy operations.
+struct ResolveRange {
+  uint32_t start;
+  uint32_t count;
+};
+
+// Backstop for strict mode.
+constexpr uint32_t kStrictZPDRetireMaxStalls = 16;
+
+// Cap for the fast-mode cached delta map.
+constexpr size_t kFastZPDCacheMaxEntries = 1024;
+
+// Consecutive stepping records on the same batch page before switching to
+// cumulative fake mode.
+constexpr uint32_t kZPDBatchRunThreshold = 4;
+constexpr uint32_t kZPDBatchRunThresholdOrphanEnd = 16;
 
 struct SwapState {
   // Lock must be held when changing data in this structure.
@@ -76,6 +104,9 @@ enum class GammaRampType {
 
 class CommandProcessor {
  public:
+  using ReportHandle = uint32_t;
+  static constexpr ReportHandle kInvalidReportHandle = 0;
+
   enum class SwapPostEffect {
     kNone,
     kFxaa,
@@ -98,6 +129,11 @@ class CommandProcessor {
 
   virtual void ClearCaches();
   virtual void InvalidateGpuMemory();
+  virtual void ClearReadbackBuffers();
+
+  // Get cached ZPD mode (avoids string parsing every frame).
+  ZPDMode GetZPDMode() const { return cached_zpd_mode_; }
+  void SetZPDMode(ZPDMode mode);
 
   // "Desired" is for the external thread managing the post-processing effect.
   SwapPostEffect GetDesiredSwapPostEffect() const { return swap_post_effect_desired_; }
@@ -209,6 +245,94 @@ class CommandProcessor {
                                           uint32_t count);
   virtual bool ExecutePacketType3_EVENT_WRITE_ZPD(memory::RingBuffer* reader, uint32_t packet,
                                                   uint32_t count);
+
+  // ZPD occlusion query infrastructure.
+  enum class QueryOpenResult {
+    kOpened,
+    kDeferred,
+    kPoolExhausted,
+    kFailed,
+  };
+
+  struct ZPDReport {
+    uint64_t accumulated_samples = 0;
+    uint64_t slot_sequence_id = 0;
+    uint32_t slot_base = 0;
+    uint32_t begin_record = 0;
+    uint32_t end_record = 0;
+    uint32_t begin_value = 0;
+    uint32_t pending_segments = 0;
+    uint32_t cached_delta = 0;
+    bool ended = false;
+  };
+
+  struct ActiveZPDSegment {
+    ReportHandle report_handle = kInvalidReportHandle;
+    uint32_t slot_base = 0;
+    uint32_t begin_record = 0;
+    uint32_t end_record = 0;
+    bool segment_active = false;
+    bool segment_pending_begin = false;
+    bool logical_active = false;
+  };
+
+  struct ZPDStats {
+    uint64_t logical_begun = 0;
+    uint64_t logical_ended = 0;
+    uint64_t segments_begun = 0;
+    uint64_t segments_ended = 0;
+    uint64_t pool_exhausted = 0;
+    uint64_t failed = 0;
+    uint64_t last_log_frame = 0;
+    void Reset(uint64_t current_frame) {
+      *this = {};
+      last_log_frame = current_frame;
+    }
+  };
+
+  virtual void EnsureZPDQueryResources() {}
+  virtual void ShutdownZPDQueryResources() {}
+  virtual bool IsZPDQueryPoolReady() const { return false; }
+  virtual bool CanOpenZPDQuery() const { return true; }
+  virtual QueryOpenResult OpenZPDQuery(ReportHandle report_handle,
+                                       bool can_close_submission) {
+    return QueryOpenResult::kFailed;
+  }
+  virtual bool CloseZPDQuery(ReportHandle report_handle) { return false; }
+  virtual bool DiscardZPDQuery() { return false; }
+  virtual void PumpQueryResolves() {}
+  virtual bool AwaitQueryResolve(ReportHandle report_handle) { return false; }
+
+  bool BeginZPDReport(uint32_t report_address);
+  bool EndZPDReport(uint32_t report_address, bool guest_forced_end);
+  void OpenQuerySegment(bool can_close_submission);
+  void CloseQuerySegment();
+  void OnZPDQueryResolved(ReportHandle report_handle, uint64_t raw_samples);
+  void WriteZPDReport(uint32_t begin_record, uint32_t end_record,
+                      uint32_t begin_value, uint32_t delta_value,
+                      bool write_begin_record);
+  void PumpPendingRetire();
+  uint32_t NormalizeSampleCount(uint64_t samples) const;
+  void CommitZPDReport(ZPDReport& report, uint32_t delta_value);
+  bool IsZPDReportCurrent(const ZPDReport& report) const;
+
+  void ResetZPDState() {
+    zpd_active_segment_ = {};
+    zpd_next_report_handle_ = 1;
+    zpd_slot_sequences_.clear();
+    zpd_slot_values_.clear();
+    logical_zpd_reports_.clear();
+    fast_zpd_report_cached_values_.clear();
+    zpd_batch_fake_ = false;
+    zpd_batch_fake_count_ = 0;
+    zpd_batch_page_ = 0;
+    zpd_batch_last_record_ = 0;
+    zpd_batch_run_ = 0;
+    fake_zpd_sample_count_ = 0;
+    zpd_pending_retire_handle_ = kInvalidReportHandle;
+    zpd_pending_retire_stalls_ = 0;
+  }
+
   bool ExecutePacketType3Draw(memory::RingBuffer* reader, uint32_t packet, const char* opcode_name,
                               uint32_t viz_query_condition, uint32_t count_remaining);
   bool ExecutePacketType3_DRAW_INDX(memory::RingBuffer* reader, uint32_t packet, uint32_t count);
@@ -302,6 +426,28 @@ class CommandProcessor {
   // Set by backend command processors to their legacy memexport readback cvar
   // name (for explicit-override compatibility).
   const char* legacy_readback_memexport_cvar_name_ = nullptr;
+
+  // ZPD occlusion query state.
+  ReportHandle zpd_next_report_handle_ = 1;
+  std::unordered_map<uint32_t, uint64_t> zpd_slot_sequences_;
+  std::unordered_map<uint32_t, uint32_t> zpd_slot_values_;
+  std::unordered_map<ReportHandle, ZPDReport> logical_zpd_reports_;
+  ActiveZPDSegment zpd_active_segment_{};
+  std::unordered_map<uint32_t, uint32_t> fast_zpd_report_cached_values_;
+  bool zpd_batch_fake_ = false;
+  uint32_t zpd_batch_fake_count_ = 0;
+  uint32_t zpd_batch_page_ = 0;
+  uint32_t zpd_batch_last_record_ = 0;
+  uint32_t zpd_batch_run_ = 0;
+  ReportHandle zpd_pending_retire_handle_ = kInvalidReportHandle;
+  uint32_t zpd_pending_retire_stalls_ = 0;
+  uint32_t zpd_draw_resolution_scale_x_ = 1;
+  uint32_t zpd_draw_resolution_scale_y_ = 1;
+  uint32_t fake_zpd_sample_count_ = 0;
+  ZPDStats zpd_stats_;
+
+  // Cached ZPD occlusion query mode (defaults to fake).
+  ZPDMode cached_zpd_mode_ = ZPDMode::kFake;
 
  private:
   reg::DC_LUT_30_COLOR gamma_ramp_256_entry_table_[256] = {};

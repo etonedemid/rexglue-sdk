@@ -12,10 +12,10 @@
 
 #include <cstdint>
 #include <string>
-
-#include <rex/platform/dynlib.h>
+#include <vector>
 
 #include <spirv-tools/libspirv.h>
+#include <spirv-tools/optimizer.hpp>
 
 namespace rex {
 namespace ui {
@@ -32,20 +32,15 @@ class SpirvToolsContext {
 
   spv_result_t Validate(const uint32_t* words, size_t num_words, std::string* error) const;
 
+  // Optimizes SPIR-V code. Returns SPV_SUCCESS on successful optimization.
+  // The optimized binary is returned in optimized_words.
+  spv_result_t Optimize(const uint32_t* words, size_t num_words,
+                        std::vector<uint32_t>& optimized_words,
+                        bool performance_passes = true);
+
  private:
-  rex::platform::DynamicLibrary library_;
-
-  template <typename FunctionPointer>
-  bool LoadLibraryFunction(FunctionPointer& function, const char* name) {
-    function = library_.GetSymbol<FunctionPointer>(name);
-    return function != nullptr;
-  }
-  decltype(&spvContextCreate) fn_spvContextCreate_ = nullptr;
-  decltype(&spvContextDestroy) fn_spvContextDestroy_ = nullptr;
-  decltype(&spvValidateBinary) fn_spvValidateBinary_ = nullptr;
-  decltype(&spvDiagnosticDestroy) fn_spvDiagnosticDestroy_ = nullptr;
-
   spv_context context_ = nullptr;
+  spv_target_env target_env_ = SPV_ENV_UNIVERSAL_1_0;
 };
 
 }  // namespace vulkan

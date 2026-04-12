@@ -203,6 +203,9 @@ bool VulkanRenderTargetCache::Initialize(uint32_t shared_memory_binding_count) {
   const VkDevice device = vulkan_device->device();
   const ui::vulkan::VulkanDevice::Properties& device_properties = vulkan_device->properties();
 
+  // Cache the SPIR-V version for utility shader creation.
+  spirv_version_ = SpirvShaderTranslator::Features(vulkan_device).spirv_version;
+
   bool fsi_path_supported =
       (device_properties.fragmentShaderSampleInterlock ||
        device_properties.fragmentShaderPixelInterlock) &&
@@ -2537,7 +2540,7 @@ VkShaderModule VulkanRenderTargetCache::GetTransferShader(TransferShaderKey key)
   std::vector<spv::Id> id_vector_temp;
   std::vector<unsigned int> uint_vector_temp;
 
-  SpirvBuilder builder(spv::Spv_1_0, (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1, nullptr);
+  SpirvBuilder builder(static_cast<spv::SpvVersion>(spirv_version_), (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1, nullptr);
   spv::Id ext_inst_glsl_std_450 = builder.import("GLSL.std.450");
   builder.addCapability(spv::CapabilityShader);
   builder.setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
@@ -5643,7 +5646,7 @@ VkPipeline VulkanRenderTargetCache::GetDumpPipeline(DumpPipelineKey key) {
 
   std::vector<spv::Id> id_vector_temp;
 
-  SpirvBuilder builder(spv::Spv_1_0, (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1, nullptr);
+  SpirvBuilder builder(static_cast<spv::SpvVersion>(spirv_version_), (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1, nullptr);
   spv::Id ext_inst_glsl_std_450 = builder.import("GLSL.std.450");
   builder.addCapability(spv::CapabilityShader);
   builder.setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);

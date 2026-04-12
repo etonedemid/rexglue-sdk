@@ -125,6 +125,7 @@ if(REXGLUE_USE_VULKAN)
         volk::volk
         GPUOpen::VulkanMemoryAllocator
         SPIRV-Tools-static
+        SPIRV-Tools-opt
     )
 endif()
 

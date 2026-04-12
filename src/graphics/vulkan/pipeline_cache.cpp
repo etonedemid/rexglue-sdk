@@ -48,6 +48,7 @@
 #include <rex/math.h>
 #include <rex/types.h>
 #include <rex/ui/vulkan/util.h>
+#include <rex/ui/vulkan/spirv_tools_context.h>
 
 REXCVAR_DEFINE_INT32(
     vulkan_pipeline_creation_threads, -1, "GPU/Vulkan",
@@ -290,6 +291,9 @@ bool VulkanPipelineCache::Initialize() {
 
   bool edram_fragment_shader_interlock =
       render_target_cache_.GetPath() == RenderTargetCache::Path::kPixelShaderInterlock;
+
+  // Cache the SPIR-V version for geometry shader creation.
+  spirv_version_ = SpirvShaderTranslator::Features(vulkan_device).spirv_version;
 
   shader_translator_ = std::make_unique<SpirvShaderTranslator>(
       SpirvShaderTranslator::Features(vulkan_device),
@@ -960,6 +964,7 @@ SpirvShaderTranslator::Modification VulkanPipelineCache::GetCurrentVertexShaderM
 
 SpirvShaderTranslator::Modification VulkanPipelineCache::GetCurrentPixelShaderModification(
     const Shader& shader, uint32_t interpolator_mask, uint32_t param_gen_pos,
+    uint32_t normalized_color_mask,
     reg::RB_DEPTHCONTROL normalized_depth_control) const {
   assert_true(shader.type() == xenos::ShaderType::kPixel);
   assert_true(shader.is_ucode_analyzed());
@@ -1005,6 +1010,13 @@ SpirvShaderTranslator::Modification VulkanPipelineCache::GetCurrentPixelShaderMo
         modification.pixel.depth_stencil_mode = DepthStencilMode::kNoModifiers;
       }
     }
+
+    // Extract 1 bit per RT from the 4-bits-per-RT normalized_color_mask.
+    modification.pixel.color_targets_used =
+        (((normalized_color_mask >> 0) & 0xF) ? 1 : 0) |
+        (((normalized_color_mask >> 4) & 0xF) ? 2 : 0) |
+        (((normalized_color_mask >> 8) & 0xF) ? 4 : 0) |
+        (((normalized_color_mask >> 12) & 0xF) ? 8 : 0);
   }
 
   return modification;
@@ -1834,21 +1846,9 @@ VkShaderModule VulkanPipelineCache::GetGeometryShader(GeometryShaderKey key) {
 
   const ui::vulkan::VulkanDevice* const vulkan_device = command_processor_.GetVulkanDevice();
   const ui::vulkan::VulkanDevice::Properties& device_properties = vulkan_device->properties();
-  const ui::vulkan::VulkanDevice::Extensions& device_extensions = vulkan_device->extensions();
   spv::SpvBuildLogger builder_logger;
   spv::SpvBuildLogger* builder_logger_ptr = nullptr;
-  spv::SpvVersion spirv_version;
-  if (device_properties.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0)) {
-    spirv_version = spv::Spv_1_5;
-  } else if (device_extensions.ext_1_2_KHR_spirv_1_4) {
-    spirv_version = spv::Spv_1_4;
-  } else if (device_properties.apiVersion >= VK_MAKE_API_VERSION(0, 1, 1, 0)) {
-    spirv_version = spv::Spv_1_3;
-  } else {
-    spirv_version = spv::Spv_1_0;
-    // Keep the build log around for compatibility diagnostics on older paths.
-    builder_logger_ptr = &builder_logger;
-  }
+  spv::SpvVersion spirv_version = static_cast<spv::SpvVersion>(spirv_version_);
   SpirvBuilder builder(spirv_version, (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1,
                        builder_logger_ptr);
   spv::Id ext_inst_glsl_std_450 = builder.import("GLSL.std.450");

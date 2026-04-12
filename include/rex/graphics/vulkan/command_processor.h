@@ -35,6 +35,7 @@
 #include <rex/graphics/vulkan/shader.h>
 #include <rex/graphics/vulkan/shared_memory.h>
 #include <rex/graphics/vulkan/texture_cache.h>
+#include <rex/graphics/vulkan/zpd_query_pool.h>
 #include <rex/graphics/xenos.h>
 #include <rex/hash.h>
 #include <rex/system/kernel_state.h>
@@ -154,6 +155,12 @@ class VulkanCommandProcessor : public CommandProcessor {
     return deferred_command_buffer_;
   }
 
+  // Debug marker support for RenderDoc/debug tools annotation.
+  void PushDebugMarker(const char* format, ...);
+  void PopDebugMarker();
+  void InsertDebugMarker(const char* format, ...);
+  bool debug_markers_enabled() const { return debug_markers_enabled_; }
+
   bool submission_open() const { return submission_open_; }
   uint64_t GetCurrentSubmission() const {
     return submission_completed_ + uint64_t(submissions_in_flight_fences_.size()) + 1;
@@ -256,6 +263,9 @@ class VulkanCommandProcessor : public CommandProcessor {
   void WriteRegistersFromMem(uint32_t start_index, uint32_t* base, uint32_t num_registers) override;
   bool ExecutePacketType3_EVENT_WRITE_ZPD(memory::RingBuffer* reader, uint32_t packet,
                                           uint32_t count) override;
+
+  void PrepareForWait() override;
+  void ReturnFromWait() override;
 
   void OnGammaRamp256EntryTableValueWritten() override;
   void OnGammaRampPWLValueWritten() override;
@@ -438,6 +448,27 @@ class VulkanCommandProcessor : public CommandProcessor {
   void SplitPendingBarrier();
 
   void DestroyScratchBuffer();
+
+  // ZPD occlusion queries backend.
+  void EnsureZPDQueryResources() override;
+  void ShutdownZPDQueryResources() override {
+    zpd_resolves_in_flight_.clear();
+    zpd_deferred_releases_.clear();
+    if (zpd_host_query_pool_) {
+      zpd_host_query_pool_->Shutdown();
+    }
+  }
+  bool IsZPDQueryPoolReady() const override {
+    return zpd_host_query_pool_ && zpd_host_query_pool_->is_initialized();
+  }
+  bool CanOpenZPDQuery() const override;
+  QueryOpenResult OpenZPDQuery(ReportHandle report_handle,
+                               bool can_close_submission) override;
+  bool CloseZPDQuery(ReportHandle report_handle) override;
+  bool DiscardZPDQuery() override;
+  void PumpQueryResolves() override;
+  bool AwaitQueryResolve(ReportHandle report_handle) override;
+
   bool InitializeOcclusionQueryResources();
   void ShutdownOcclusionQueryResources();
   bool BeginGuestOcclusionQuery(uint32_t sample_count_address);
@@ -527,6 +558,16 @@ class VulkanCommandProcessor : public CommandProcessor {
   std::vector<VkFence> fences_free_;
   std::vector<VkSemaphore> semaphores_free_;
 
+  struct PendingQueryResolve {
+    uint64_t submission = 0;
+    uint32_t query_index = UINT32_MAX;
+    uint32_t query_generation = 0;
+    ReportHandle report_handle = kInvalidReportHandle;
+  };
+  uint32_t zpd_active_query_index_ = UINT32_MAX;
+  uint32_t zpd_active_query_generation_ = 0;
+  std::deque<PendingQueryResolve> zpd_resolves_in_flight_;
+
   bool submission_open_ = false;
   uint64_t submission_completed_ = 0;
   // In case vkQueueSubmit fails after something like a successful
@@ -558,6 +599,7 @@ class VulkanCommandProcessor : public CommandProcessor {
   std::vector<CommandBuffer> command_buffers_writable_;
   std::deque<std::pair<uint64_t, CommandBuffer>> command_buffers_submitted_;
   DeferredCommandBuffer deferred_command_buffer_;
+  bool debug_markers_enabled_ = false;
 
   std::vector<VkSparseMemoryBind> sparse_memory_binds_;
   std::vector<SparseBufferBind> sparse_buffer_binds_;
@@ -616,6 +658,17 @@ class VulkanCommandProcessor : public CommandProcessor {
   std::unique_ptr<VulkanPrimitiveProcessor> primitive_processor_;
 
   std::unique_ptr<VulkanRenderTargetCache> render_target_cache_;
+
+  std::unique_ptr<VulkanZPDQueryPool> zpd_host_query_pool_;
+
+  // Deferred query slot releases for discards that happen outside a render
+  // pass, where vkCmdEndQuery cannot be issued.
+  struct DeferredQueryRelease {
+    uint64_t submission;
+    uint32_t query_index;
+    uint32_t query_generation;
+  };
+  std::deque<DeferredQueryRelease> zpd_deferred_releases_;
 
   std::unique_ptr<VulkanPipelineCache> pipeline_cache_;
 

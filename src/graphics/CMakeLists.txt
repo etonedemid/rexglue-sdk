@@ -53,6 +53,7 @@ set(REXGRAPHICS_VULKAN_SOURCES
     vulkan/pipeline_cache.cpp
     vulkan/primitive_processor.cpp
     vulkan/render_target_cache.cpp
+    vulkan/zpd_query_pool.cpp
     vulkan/shader.cpp
     vulkan/shared_memory.cpp
     vulkan/texture_cache.cpp

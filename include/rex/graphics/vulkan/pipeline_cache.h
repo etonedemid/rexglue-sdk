@@ -82,6 +82,7 @@ class VulkanPipelineCache {
       uint32_t interpolator_mask, bool ps_param_gen_used) const;
   SpirvShaderTranslator::Modification GetCurrentPixelShaderModification(
       const Shader& shader, uint32_t interpolator_mask, uint32_t param_gen_pos,
+      uint32_t normalized_color_mask,
       reg::RB_DEPTHCONTROL normalized_depth_control) const;
 
   bool EnsureShadersTranslated(VulkanShader::VulkanTranslation* vertex_shader,
@@ -380,6 +381,8 @@ class VulkanPipelineCache {
   string::StringBuffer ucode_disasm_buffer_;
   // Reusable shader translator on the command processor thread.
   std::unique_ptr<SpirvShaderTranslator> shader_translator_;
+  // Cached SPIR-V version based on device capabilities.
+  unsigned int spirv_version_;
 
   struct LayoutUID {
     size_t uid;
