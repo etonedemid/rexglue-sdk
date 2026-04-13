@@ -31,10 +31,6 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
                                                        const bool try_enable_validation) {
   std::unique_ptr<VulkanInstance> vulkan_instance(new VulkanInstance());
 
-  // Load the RenderDoc API if connected.
-
-  vulkan_instance->renderdoc_api_ = RenderDocAPI::CreateIfConnected();
-
   // Load the loader library.
 
   Functions& ifn = vulkan_instance->functions_;

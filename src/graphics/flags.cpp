@@ -11,7 +11,7 @@
 
 #include <rex/graphics/flags.h>
 #include <rex/logging.h>
-#include <rex/ui/renderdoc_api.h>
+// flags.cpp intentionally has no renderdoc include
 
 REXCVAR_DEFINE_BOOL(gpu_allow_invalid_fetch_constants, false, "GPU",
                     "Allow invalid fetch constants");
@@ -30,23 +30,16 @@ REXCVAR_DEFINE_BOOL(use_fuzzy_alpha_epsilon, false, "GPU",
                     "flickering on NVIDIA graphics cards");
 REXCVAR_DEFINE_BOOL(gpu_debug_markers, false, "GPU",
                     "Insert debug markers into GPU command streams for tools "
-                    "like PIX and RenderDoc. Automatically enabled when "
-                    "RenderDoc is detected.");
+                    "like PIX and RenderDoc.");
 
 bool IsGpuDebugMarkersEnabled() {
   static bool cached = false;
   static bool result = false;
   if (!cached) {
     cached = true;
-    if (REXCVAR_GET(gpu_debug_markers)) {
-      result = true;
+    result = REXCVAR_GET(gpu_debug_markers);
+    if (result) {
       REXLOG_INFO("GPU debug markers enabled via CVar");
-    } else {
-      auto renderdoc_api = rex::ui::RenderDocAPI::CreateIfConnected();
-      if (renderdoc_api) {
-        result = true;
-        REXLOG_INFO("GPU debug markers auto-enabled (RenderDoc detected)");
-      }
     }
   }
   return result;
