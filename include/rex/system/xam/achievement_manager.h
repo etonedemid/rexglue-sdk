@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -78,6 +79,7 @@ class AchievementManager {
  private:
   void LoadUnlockState();
   void SaveUnlockState();
+  void ExportIconPngs(const std::filesystem::path& content_dir);
   uint64_t CurrentFileTime() const;
 
   KernelState* kernel_state_;

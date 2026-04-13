@@ -13,6 +13,8 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 
 #include <fmt/format.h>
 
@@ -21,6 +23,118 @@
 #include <rex/string/util.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/xam/content_manager.h>
+
+namespace {
+
+// Minimal JSON string escaping (no external JSON library dependency).
+std::string JsonEscape(const std::string& s) {
+  std::string out;
+  out.reserve(s.size() + 8);
+  for (char c : s) {
+    switch (c) {
+      case '"':
+        out += "\\\"";
+        break;
+      case '\\':
+        out += "\\\\";
+        break;
+      case '\n':
+        out += "\\n";
+        break;
+      case '\r':
+        out += "\\r";
+        break;
+      case '\t':
+        out += "\\t";
+        break;
+      default:
+        if (static_cast<unsigned char>(c) < 0x20) {
+          out += fmt::format("\\u{:04x}", static_cast<unsigned>(c));
+        } else {
+          out += c;
+        }
+        break;
+    }
+  }
+  return out;
+}
+
+// Very small JSON value parser — handles the subset we write.
+// Skips whitespace, returns the next non-whitespace char, or 0 on EOF.
+char SkipWs(std::istream& in) {
+  char c;
+  while (in.get(c)) {
+    if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
+      return c;
+  }
+  return 0;
+}
+
+// Read a JSON string (after the opening '"' has been consumed).
+std::string ReadJsonString(std::istream& in) {
+  std::string out;
+  char c;
+  while (in.get(c)) {
+    if (c == '"')
+      return out;
+    if (c == '\\') {
+      if (!in.get(c))
+        break;
+      switch (c) {
+        case '"':
+          out += '"';
+          break;
+        case '\\':
+          out += '\\';
+          break;
+        case 'n':
+          out += '\n';
+          break;
+        case 'r':
+          out += '\r';
+          break;
+        case 't':
+          out += '\t';
+          break;
+        default:
+          out += c;
+          break;
+      }
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+// Read a JSON number token (integer or unsigned).
+uint64_t ReadJsonUint(std::istream& in, char first) {
+  std::string num;
+  num += first;
+  char c;
+  while (in.get(c)) {
+    if (c >= '0' && c <= '9') {
+      num += c;
+    } else {
+      in.putback(c);
+      break;
+    }
+  }
+  return std::stoull(num);
+}
+
+// Read a JSON boolean.
+bool ReadJsonBool(std::istream& in, char first) {
+  // first is 't' or 'f'
+  if (first == 't') {
+    in.ignore(3);  // "rue"
+    return true;
+  }
+  in.ignore(4);  // "alse"
+  return false;
+}
+
+}  // namespace
 
 namespace rex::system::xam {
 
@@ -161,36 +275,73 @@ std::vector<uint8_t> AchievementManager::GetAchievementIconPng(uint32_t achievem
 
 void AchievementManager::LoadUnlockState() {
   auto content_dir = kernel_state_->content_manager()->ResolveGameUserContentPath();
-  auto file_path = content_dir / "achievements.bin";
+  auto file_path = content_dir / "achievements.json";
 
-  auto file = rex::filesystem::OpenFile(file_path, "rb");
-  if (!file) {
+  std::ifstream file(file_path);
+  if (!file.is_open()) {
     return;
   }
 
-  // Format: [uint32_t count] [uint32_t id, uint64_t unlock_time] * count
-  uint32_t count = 0;
-  if (fread(&count, sizeof(count), 1, file) != 1) {
-    fclose(file);
+  // Parse the JSON array of achievement objects.
+  // Expected format: [ { "id": N, "unlocked": bool, "unlock_time": N }, ... ]
+  char c = SkipWs(file);
+  if (c != '[')
     return;
-  }
 
-  for (uint32_t i = 0; i < count; ++i) {
+  while (file.good()) {
+    c = SkipWs(file);
+    if (c == ']')
+      break;
+    if (c == ',')
+      c = SkipWs(file);
+    if (c != '{')
+      break;
+
     uint32_t id = 0;
+    bool unlocked = false;
     uint64_t unlock_time = 0;
-    if (fread(&id, sizeof(id), 1, file) != 1)
-      break;
-    if (fread(&unlock_time, sizeof(unlock_time), 1, file) != 1)
-      break;
 
-    auto it = id_to_index_.find(id);
-    if (it != id_to_index_.end()) {
-      achievements_[it->second].unlocked = true;
-      achievements_[it->second].unlock_time = unlock_time;
+    // Read key-value pairs within the object.
+    while (file.good()) {
+      c = SkipWs(file);
+      if (c == '}')
+        break;
+      if (c == ',')
+        c = SkipWs(file);
+      if (c != '"')
+        break;
+      std::string key = ReadJsonString(file);
+      c = SkipWs(file);  // ':'
+      if (c != ':')
+        break;
+      c = SkipWs(file);  // value start
+
+      if (key == "id") {
+        id = static_cast<uint32_t>(ReadJsonUint(file, c));
+      } else if (key == "unlocked") {
+        unlocked = ReadJsonBool(file, c);
+      } else if (key == "unlock_time") {
+        unlock_time = ReadJsonUint(file, c);
+      } else {
+        // Skip unknown values — primitive only (string or number or bool).
+        if (c == '"') {
+          ReadJsonString(file);
+        } else if (c == 't' || c == 'f') {
+          ReadJsonBool(file, c);
+        } else {
+          ReadJsonUint(file, c);
+        }
+      }
+    }
+
+    if (unlocked) {
+      auto it = id_to_index_.find(id);
+      if (it != id_to_index_.end()) {
+        achievements_[it->second].unlocked = true;
+        achievements_[it->second].unlock_time = unlock_time;
+      }
     }
   }
-
-  fclose(file);
 
   uint32_t unlocked_count = 0;
   for (const auto& a : achievements_) {
@@ -204,30 +355,63 @@ void AchievementManager::LoadUnlockState() {
 void AchievementManager::SaveUnlockState() {
   auto content_dir = kernel_state_->content_manager()->ResolveGameUserContentPath();
   std::filesystem::create_directories(content_dir);
-  auto file_path = content_dir / "achievements.bin";
+  auto file_path = content_dir / "achievements.json";
 
-  auto file = rex::filesystem::OpenFile(file_path, "wb");
-  if (!file) {
-    REXSYS_ERROR("AchievementManager: failed to save unlock state to {}", file_path.string());
+  std::ofstream file(file_path);
+  if (!file.is_open()) {
+    REXSYS_ERROR("AchievementManager: failed to save state to {}", file_path.string());
     return;
   }
 
-  // Count unlocked
-  uint32_t count = 0;
-  for (const auto& a : achievements_) {
-    if (a.unlocked)
-      ++count;
+  file << "[\n";
+  for (size_t i = 0; i < achievements_.size(); ++i) {
+    const auto& a = achievements_[i];
+    file << "  {\n";
+    file << "    \"id\": " << a.id << ",\n";
+    file << "    \"label\": \"" << JsonEscape(a.label) << "\",\n";
+    file << "    \"description\": \"" << JsonEscape(a.description) << "\",\n";
+    file << "    \"gamerscore\": " << a.gamerscore << ",\n";
+    file << "    \"unlocked\": " << (a.unlocked ? "true" : "false") << ",\n";
+    file << "    \"unlock_time\": " << a.unlock_time << "\n";
+    file << "  }";
+    if (i + 1 < achievements_.size()) {
+      file << ",";
+    }
+    file << "\n";
+  }
+  file << "]\n";
+
+  // Export each achievement icon as a PNG file in an "icons" subdirectory.
+  ExportIconPngs(content_dir);
+}
+
+void AchievementManager::ExportIconPngs(const std::filesystem::path& content_dir) {
+  auto icons_dir = content_dir / "icons";
+  std::filesystem::create_directories(icons_dir);
+
+  const util::XdbfGameData db = kernel_state_->title_xdbf();
+  if (!db.is_valid()) {
+    return;
   }
 
-  fwrite(&count, sizeof(count), 1, file);
   for (const auto& a : achievements_) {
-    if (a.unlocked) {
-      fwrite(&a.id, sizeof(a.id), 1, file);
-      fwrite(&a.unlock_time, sizeof(a.unlock_time), 1, file);
+    if (!a.image_id) {
+      continue;
+    }
+    auto icon_path = icons_dir / fmt::format("{}.png", a.id);
+    if (std::filesystem::exists(icon_path)) {
+      continue;  // Already exported.
+    }
+    auto block = db.GetEntry(util::XdbfSection::kImage, a.image_id);
+    if (!block) {
+      continue;
+    }
+    std::ofstream icon_file(icon_path, std::ios::binary);
+    if (icon_file.is_open()) {
+      icon_file.write(reinterpret_cast<const char*>(block.buffer),
+                      static_cast<std::streamsize>(block.size));
     }
   }
-
-  fclose(file);
 }
 
 uint64_t AchievementManager::CurrentFileTime() const {
