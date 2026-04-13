@@ -594,6 +594,12 @@ void KernelState::SetExecutableModule(object_ref<UserModule> module) {
     dispatch_thread_->set_name("Kernel Dispatch");
     dispatch_thread_->Create();
   }
+
+  // Load achievement definitions from the title's XDBF now that the
+  // executable module (and its XDBF section) is available.
+  if (achievement_manager_) {
+    achievement_manager_->LoadTitleAchievements();
+  }
 }
 
 void KernelState::LoadKernelModule(object_ref<KernelModule> kernel_module) {
