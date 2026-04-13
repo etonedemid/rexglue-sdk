@@ -234,10 +234,10 @@ u32 NtReadFile_entry(u32 file_handle, u32 event_handle, mapped_void apc_routine_
           uint32_t apc_routine = static_cast<uint32_t>(apc_routine_ptr) & ~1u;
           uint32_t apc_ctx = apc_context.guest_address();
           uint32_t apc_arg1 = io_status_block.guest_address();
-          REXKRNL_IMPORT_TRACE("NtReadFile",
-                               "queue_apc thid={} normal={:#x} ctx={:#x} arg1={:#x} arg2=0 status={:#x}",
-                               thread ? thread->thread_id() : 0, apc_routine, apc_ctx, apc_arg1,
-                               result);
+          REXKRNL_IMPORT_TRACE(
+              "NtReadFile",
+              "queue_apc thid={} normal={:#x} ctx={:#x} arg1={:#x} arg2=0 status={:#x}",
+              thread ? thread->thread_id() : 0, apc_routine, apc_ctx, apc_arg1, result);
           thread->EnqueueApc(apc_routine, apc_ctx, apc_arg1, 0);
           apc_queued = true;
         }
@@ -601,13 +601,6 @@ u32 NtQueryDirectoryFile_entry(u32 file_handle, u32 event_handle, u32 apc_routin
 
 u32 NtFlushBuffersFile_entry(u32 file_handle, ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block_ptr) {
   auto result = X_STATUS_SUCCESS;
-
-  auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
-  if (file) {
-    file->file()->Flush();
-  } else {
-    result = X_STATUS_INVALID_HANDLE;
-  }
 
   if (io_status_block_ptr) {
     io_status_block_ptr->status = result;

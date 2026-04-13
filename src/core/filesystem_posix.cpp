@@ -181,8 +181,9 @@ std::unique_ptr<FileHandle> FileHandle::OpenExisting(const std::filesystem::path
   // We must compute the correct access mode explicitly.
   bool wants_read = (desired_access & (FileAccess::kGenericRead | FileAccess::kFileReadData |
                                        FileAccess::kGenericExecute | FileAccess::kGenericAll)) != 0;
-  bool wants_write = (desired_access & (FileAccess::kGenericWrite | FileAccess::kFileWriteData |
-                                        FileAccess::kFileAppendData | FileAccess::kGenericAll)) != 0;
+  bool wants_write =
+      (desired_access & (FileAccess::kGenericWrite | FileAccess::kFileWriteData |
+                         FileAccess::kFileAppendData | FileAccess::kGenericAll)) != 0;
 
   int open_access;
   if (wants_read && wants_write) {

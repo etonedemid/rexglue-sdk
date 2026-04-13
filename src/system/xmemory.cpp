@@ -28,7 +28,12 @@
 // TODO(benvanik): move xbox.h out
 #include <rex/system/xtypes.h>
 
-REXCVAR_DEFINE_BOOL(protect_zero, false, "Memory", "Protect the zero page from reads and writes")
+REXCVAR_DEFINE_BOOL(protect_zero, true, "Memory", "Protect the zero page from reads and writes")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+REXCVAR_DEFINE_STRING(null_page_fill, "zero", "Memory",
+                      "Fill pattern for the null page when readable: "
+                      "zero (0x00), cd (0xCD), off (no fill)")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(protect_on_release, false, "Memory",
@@ -180,22 +185,25 @@ bool Memory::Initialize() {
                               0x1FD00000, 4096, &heaps_.physical);
 
   // Protect the first and last 64kb of memory.
-  // Always commit as read-write first so we can scribble a non-zero pattern,
-  // then downgrade protection.  Games that dereference null pointers will read
-  // 0xCD instead of 0x00, which prevents silent data-dependent rendering bugs
-  // (the "black screen" issue on Linux where zeroed null-page memory causes
-  // the game to skip geometry submission).
   heaps_.v00000000.AllocFixed(0x00000000, 0x10000, 0x10000,
                               memory::kMemoryAllocationReserve | memory::kMemoryAllocationCommit,
-                              memory::kMemoryProtectRead | memory::kMemoryProtectWrite);
-  std::memset(heaps_.v00000000.TranslateRelative(0), 0xCD, 0x10000);
-  if (REXCVAR_GET(protect_zero)) {
-    rex::memory::Protect(heaps_.v00000000.TranslateRelative(0), 0x10000,
-                         rex::memory::PageAccess::kNoAccess, nullptr);
-  } else {
-    rex::memory::Protect(heaps_.v00000000.TranslateRelative(0), 0x10000,
-                         rex::memory::PageAccess::kReadOnly, nullptr);
+                              !REXCVAR_GET(protect_zero)
+                                  ? memory::kMemoryProtectRead | memory::kMemoryProtectWrite
+                                  : memory::kMemoryProtectNoAccess);
+
+  // When the null page is readable, optionally fill it with a non-zero
+  // pattern so that null-pointer dereferences don't silently return 0x00
+  // (which can cause data-dependent rendering bugs on Linux).
+  if (!REXCVAR_GET(protect_zero)) {
+    const auto fill = REXCVAR_GET(null_page_fill);
+    if (fill == "cd") {
+      std::memset(heaps_.v00000000.TranslateRelative(0), 0xCD, 0x10000);
+    } else if (fill == "zero") {
+      std::memset(heaps_.v00000000.TranslateRelative(0), 0x00, 0x10000);
+    }
+    // "off" or anything else: leave the page as-is.
   }
+
   heaps_.physical.AllocFixed(0x1FFF0000, 0x10000, 0x10000, memory::kMemoryAllocationReserve,
                              memory::kMemoryProtectNoAccess);
 
@@ -1063,7 +1071,7 @@ bool BaseHeap::Alloc(uint32_t size, uint32_t alignment, uint32_t allocation_type
   if (heap_type_ == memory::HeapType::kGuestVirtual) {
     heap_virtual_guest_offset = 0x10000000;
     if (page_size_ == 0x10000) {
-      heap_virtual_guest_offset = 0x00000000;
+      heap_virtual_guest_offset = 0x0F000000;
     }
   }
 
@@ -1210,19 +1218,6 @@ bool BaseHeap::AllocRange(uint32_t low_address, uint32_t high_address, uint32_t 
 
   std::lock_guard<std::recursive_mutex> heap_lock(heap_mutex_);
 
-  // Early-out: if there aren't enough free pages total, skip the expensive scan.
-  if (unreserved_page_count_ < page_count) {
-    static std::atomic<uint32_t> oom_early_count{0};
-    uint32_t count = oom_early_count.fetch_add(1);
-    if (count < 5 || (count % 10000 == 0)) {
-      REXSYS_ERROR(
-          "BaseHeap::Alloc early-out: not enough free pages (occurrence #{}): "
-          "heap_base={:#010x} requested_pages={} free_pages={}",
-          count + 1, heap_base_, page_count, unreserved_page_count_);
-    }
-    return false;
-  }
-
   // Find a free page range.
   // The base page must match the requested alignment, so we first scan for
   // a free aligned page and only then check for continuous free pages.
@@ -1302,39 +1297,9 @@ bool BaseHeap::AllocRange(uint32_t low_address, uint32_t high_address, uint32_t 
     }
   }
   if (start_page_number == UINT_MAX || end_page_number == UINT_MAX) {
-    // Out of memory - rate limit logging to avoid performance impact.
-    static std::atomic<uint32_t> oom_log_count{0};
-    uint32_t count = oom_log_count.fetch_add(1);
-    if (count < 5 || (count % 10000 == 0)) {
-      uint32_t free_pages = 0;
-      uint32_t used_pages = 0;
-      uint32_t max_free_run = 0;
-      uint32_t current_free_run = 0;
-      uint32_t reserved_only_pages = 0;
-      for (uint32_t i = 0; i < page_table_.size(); ++i) {
-        if (page_table_[i].state == 0) {
-          ++free_pages;
-          ++current_free_run;
-          if (current_free_run > max_free_run) max_free_run = current_free_run;
-        } else {
-          ++used_pages;
-          current_free_run = 0;
-          if ((page_table_[i].state & memory::kMemoryAllocationCommit) == 0) {
-            ++reserved_only_pages;
-          }
-        }
-      }
-      REXSYS_ERROR(
-          "BaseHeap::Alloc failed to find contiguous range (occurrence #{}): "
-          "heap_base={:#010x} heap_size={:#x} page_size={} "
-          "requested_pages={} low_page={} high_page={} top_down={} "
-          "free_pages={} used_pages={} total_pages={} "
-          "max_free_run={} reserved_only={}",
-          count + 1, heap_base_, heap_size_, page_size_,
-          page_count, low_page_number, high_page_number, top_down,
-          free_pages, used_pages, uint32_t(page_table_.size()),
-          max_free_run, reserved_only_pages);
-    }
+    // Out of memory.
+    REXSYS_ERROR("BaseHeap::Alloc failed to find contiguous range");
+    assert_always("Heap exhausted!");
     return false;
   }
 
@@ -1372,24 +1337,6 @@ bool BaseHeap::AllocRange(uint32_t low_address, uint32_t high_address, uint32_t 
   }
 
   *out_address = heap_base_ + (start_page_number << page_size_shift_);
-
-  // Periodic heap utilization logging for v40000000 heap
-  if (heap_base_ == 0x40000000) {
-    static uint32_t v40_alloc_count = 0;
-    v40_alloc_count++;
-    if (v40_alloc_count % 500 == 0) {
-      uint32_t free = 0, used = 0;
-      for (uint32_t i = 0; i < page_table_.size(); ++i) {
-        if (page_table_[i].state == 0) ++free; else ++used;
-      }
-      REXSYS_INFO("v40000000 heap: alloc #{} pages={} addr={:#010x} used={}/{} ({:.1f}%)",
-                  v40_alloc_count, page_count,
-                  heap_base_ + (start_page_number << page_size_shift_),
-                  used, uint32_t(page_table_.size()),
-                  100.0 * used / page_table_.size());
-    }
-  }
-
   return true;
 }
 
@@ -1472,17 +1419,6 @@ bool BaseHeap::Release(uint32_t base_address, uint32_t* out_region_size) {
     auto& page_entry = page_table_[page_number];
     page_entry.qword = 0;
     unreserved_page_count_++;
-  }
-
-  // Periodic release logging for v40000000 heap
-  if (heap_base_ == 0x40000000) {
-    static uint32_t v40_release_count = 0;
-    v40_release_count++;
-    if (v40_release_count % 500 == 0) {
-      REXSYS_INFO("v40000000 heap: release #{} pages={} addr={:#010x}",
-                  v40_release_count, (uint32_t)base_page_entry.region_page_count,
-                  base_address);
-    }
   }
 
   return true;
