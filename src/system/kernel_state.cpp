@@ -57,12 +57,15 @@ KernelState::KernelState(Runtime* emulator)
   app_manager_ = std::make_unique<xam::AppManager>();
   user_profile_ = std::make_unique<xam::UserProfile>();
   user_profile_->set_kernel_state(this);
+  achievement_manager_ = std::make_unique<xam::AchievementManager>(this);
 
   auto user_data_root = emulator_->user_data_root();
   if (!user_data_root.empty()) {
     user_data_root = std::filesystem::absolute(user_data_root);
   }
   content_manager_ = std::make_unique<xam::ContentManager>(this, user_data_root);
+  ra_client_ = std::make_unique<xam::RAClient>(emulator_, achievement_manager_.get(),
+                                                user_data_root);
 
   if (shared_kernel_state_ != nullptr) {
     REXSYS_ERROR("KernelState constructed but shared_kernel_state_ already set");

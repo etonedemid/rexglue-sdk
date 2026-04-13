@@ -97,10 +97,13 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
                 if (a.id == id) {
                   std::string label = a.label;
                   uint16_t gs = a.gamerscore;
+                  auto icon = achievement_manager->GetAchievementIconPng(id);
                   app_context->CallInUIThread(
-                      [imgui_drawer, label = std::move(label), gs]() {
+                      [imgui_drawer, label = std::move(label), gs,
+                       icon = std::move(icon)]() mutable {
                         // The toast self-destructs via ImGuiDialog mechanisms
-                        new rex::ui::AchievementToast(imgui_drawer, label, gs);
+                        new rex::ui::AchievementToast(imgui_drawer, label, gs,
+                                                      std::move(icon));
                       });
                   break;
                 }

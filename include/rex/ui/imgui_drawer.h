@@ -55,6 +55,14 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
 
   void Draw(UIDrawContext& ui_draw_context) override;
 
+  // Create a GPU texture usable as ImTextureID. Returns nullptr if no
+  // ImmediateDrawer is attached yet. Called by dialogs that need to upload
+  // image data (e.g. achievement toast PNG, achievement icons).
+  std::unique_ptr<ImmediateTexture> CreateTexture(uint32_t width, uint32_t height,
+                                                  ImmediateTextureFilter filter,
+                                                  bool is_dynamic,
+                                                  const uint8_t* data);
+
  protected:
   void OnKeyDown(KeyEvent& e) override;
   void OnKeyUp(KeyEvent& e) override;

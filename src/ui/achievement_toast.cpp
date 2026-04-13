@@ -27,10 +27,12 @@ namespace rex::ui {
 
 AchievementToast::AchievementToast(ImGuiDrawer* imgui_drawer, std::string title,
                                    uint16_t gamerscore,
+                                   std::vector<uint8_t> icon_png,
                                    float duration_seconds)
     : ImGuiDialog(imgui_drawer),
       title_(std::move(title)),
       gamerscore_(gamerscore),
+      icon_png_(std::move(icon_png)),
       duration_seconds_(duration_seconds) {}
 
 AchievementToast::~AchievementToast() {
@@ -53,14 +55,27 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
           kAchievementImageData, static_cast<int>(kAchievementImageSize),
           &w, &h, &channels, 4);
       if (rgba && w > 0 && h > 0) {
-        auto* drawer = imgui_drawer()->immediate_drawer();
-        if (drawer) {
-          banner_texture_ = drawer->CreateTexture(
-              static_cast<uint32_t>(w), static_cast<uint32_t>(h),
-              ImmediateTextureFilter::kLinear, false, rgba);
-        }
+        banner_texture_ = imgui_drawer()->CreateTexture(
+            static_cast<uint32_t>(w), static_cast<uint32_t>(h),
+            ImmediateTextureFilter::kLinear, false, rgba);
         stbi_image_free(rgba);
       }
+    }
+
+    // Decode the per-achievement icon PNG (from XDBF) if one was supplied.
+    if (!icon_decoded_ && !icon_png_.empty()) {
+      icon_decoded_ = true;
+      int iw = 0, ih = 0, ich = 0;
+      unsigned char* icon_rgba = stbi_load_from_memory(
+          icon_png_.data(), static_cast<int>(icon_png_.size()),
+          &iw, &ih, &ich, 4);
+      if (icon_rgba && iw > 0 && ih > 0) {
+        icon_texture_ = imgui_drawer()->CreateTexture(
+            static_cast<uint32_t>(iw), static_cast<uint32_t>(ih),
+            ImmediateTextureFilter::kLinear, false, icon_rgba);
+        stbi_image_free(icon_rgba);
+      }
+      icon_png_.clear();  // free memory after upload
     }
 
     // Play the achievement unlock sound.
@@ -134,7 +149,7 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
     }
 
     // Overlay gamerscore + title text in the lower portion of the banner.
-    // The Xbox logo occupies ~28% of the left side; text area is to the right.
+    // The achievement ring icon occupies ~25% of the left side; text area is to the right.
     ImVec2 win_pos = ImGui::GetWindowPos();
     float text_x = win_pos.x + kBannerWidth * 0.28f - 10.0f; 
     float text_y = win_pos.y + kBannerHeight * 0.60f;
@@ -146,6 +161,21 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
         ImVec2(text_x, text_y),
         ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)),
         (std::to_string(gamerscore_) + " G - " + title_).c_str());
+
+    // Draw per-achievement icon (rounded) on the left side, over the banner's ring slot.
+    if (icon_texture_) {
+      constexpr float kIconSize = 53.0f;
+      constexpr float kIconX = 8.0f;
+      float icon_y = (kBannerHeight - kIconSize) * 0.5f;
+      ImVec2 icon_min(win_pos.x + kIconX, win_pos.y + icon_y);
+      ImVec2 icon_max(icon_min.x + kIconSize, icon_min.y + kIconSize);
+      ImGui::GetWindowDrawList()->AddImageRounded(
+          reinterpret_cast<ImTextureID>(icon_texture_.get()),
+          icon_min, icon_max,
+          ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
+          ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)),
+          6.0f);
+    }
   }
   ImGui::End();
 

@@ -810,12 +810,9 @@ class AchievementsDialog : public XamDialog {
         it->second.data(), static_cast<int>(it->second.size()),
         &w, &h, &channels, 4);
     if (rgba && w > 0 && h > 0) {
-      auto* drawer = imgui_drawer()->immediate_drawer();
-      if (drawer) {
-        icon_textures_[achievement_id] = drawer->CreateTexture(
-            static_cast<uint32_t>(w), static_cast<uint32_t>(h),
-            rex::ui::ImmediateTextureFilter::kLinear, false, rgba);
-      }
+      icon_textures_[achievement_id] = imgui_drawer()->CreateTexture(
+          static_cast<uint32_t>(w), static_cast<uint32_t>(h),
+          rex::ui::ImmediateTextureFilter::kLinear, false, rgba);
       stbi_image_free(rgba);
     }
     it->second.clear();  // Free PNG data after decoding.
