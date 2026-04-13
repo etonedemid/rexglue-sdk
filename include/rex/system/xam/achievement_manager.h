@@ -60,7 +60,8 @@ class AchievementManager {
   // Get all achievement states for the current title.
   // Lazily loads from XDBF on first call if not yet loaded.
   const std::vector<AchievementState>& achievements() {
-    if (!loaded_) LoadTitleAchievements();
+    if (!loaded_)
+      LoadTitleAchievements();
     return achievements_;
   }
 

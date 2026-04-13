@@ -24,8 +24,7 @@
 
 namespace rex::system::xam {
 
-AchievementManager::AchievementManager(KernelState* kernel_state)
-    : kernel_state_(kernel_state) {}
+AchievementManager::AchievementManager(KernelState* kernel_state) : kernel_state_(kernel_state) {}
 
 void AchievementManager::LoadTitleAchievements() {
   std::lock_guard lock(mutex_);
@@ -61,12 +60,11 @@ void AchievementManager::LoadTitleAchievements() {
   LoadUnlockState();
   loaded_ = true;
 
-  REXSYS_INFO("AchievementManager: loaded {} achievements for title {:08X}",
-              achievements_.size(), kernel_state_->title_id());
+  REXSYS_INFO("AchievementManager: loaded {} achievements for title {:08X}", achievements_.size(),
+              kernel_state_->title_id());
 }
 
-std::vector<uint32_t> AchievementManager::UnlockAchievements(
-    const std::vector<uint32_t>& ids) {
+std::vector<uint32_t> AchievementManager::UnlockAchievements(const std::vector<uint32_t>& ids) {
   std::lock_guard lock(mutex_);
 
   if (!loaded_) {
@@ -92,8 +90,7 @@ std::vector<uint32_t> AchievementManager::UnlockAchievements(
     achievement.unlock_time = now;
     newly_unlocked.push_back(id);
 
-    REXSYS_INFO("Achievement unlocked: \"{}\" (+{} G)",
-                achievement.label, achievement.gamerscore);
+    REXSYS_INFO("Achievement unlocked: \"{}\" (+{} G)", achievement.label, achievement.gamerscore);
   }
 
   if (!newly_unlocked.empty()) {
@@ -141,8 +138,7 @@ uint32_t AchievementManager::GetTotalGamerscore() const {
   return total;
 }
 
-std::vector<uint8_t> AchievementManager::GetAchievementIconPng(
-    uint32_t achievement_id) const {
+std::vector<uint8_t> AchievementManager::GetAchievementIconPng(uint32_t achievement_id) const {
   std::lock_guard lock(mutex_);
   auto it = id_to_index_.find(achievement_id);
   if (it == id_to_index_.end()) {
@@ -182,8 +178,10 @@ void AchievementManager::LoadUnlockState() {
   for (uint32_t i = 0; i < count; ++i) {
     uint32_t id = 0;
     uint64_t unlock_time = 0;
-    if (fread(&id, sizeof(id), 1, file) != 1) break;
-    if (fread(&unlock_time, sizeof(unlock_time), 1, file) != 1) break;
+    if (fread(&id, sizeof(id), 1, file) != 1)
+      break;
+    if (fread(&unlock_time, sizeof(unlock_time), 1, file) != 1)
+      break;
 
     auto it = id_to_index_.find(id);
     if (it != id_to_index_.end()) {
@@ -196,10 +194,11 @@ void AchievementManager::LoadUnlockState() {
 
   uint32_t unlocked_count = 0;
   for (const auto& a : achievements_) {
-    if (a.unlocked) ++unlocked_count;
+    if (a.unlocked)
+      ++unlocked_count;
   }
-  REXSYS_INFO("AchievementManager: {}/{} achievements previously unlocked",
-              unlocked_count, achievements_.size());
+  REXSYS_INFO("AchievementManager: {}/{} achievements previously unlocked", unlocked_count,
+              achievements_.size());
 }
 
 void AchievementManager::SaveUnlockState() {
@@ -209,15 +208,15 @@ void AchievementManager::SaveUnlockState() {
 
   auto file = rex::filesystem::OpenFile(file_path, "wb");
   if (!file) {
-    REXSYS_ERROR("AchievementManager: failed to save unlock state to {}",
-                 file_path.string());
+    REXSYS_ERROR("AchievementManager: failed to save unlock state to {}", file_path.string());
     return;
   }
 
   // Count unlocked
   uint32_t count = 0;
   for (const auto& a : achievements_) {
-    if (a.unlocked) ++count;
+    if (a.unlocked)
+      ++count;
   }
 
   fwrite(&count, sizeof(count), 1, file);

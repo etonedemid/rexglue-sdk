@@ -27,11 +27,9 @@ using namespace rex::system;
 
 XgiApp::XgiApp(KernelState* kernel_state)
     : App(kernel_state, 0xFB),
-      achievement_manager_(
-          std::make_unique<system::xam::AchievementManager>(kernel_state)),
+      achievement_manager_(std::make_unique<system::xam::AchievementManager>(kernel_state)),
       ra_client_(std::make_unique<system::xam::RAClient>(
-          kernel_state->emulator(),
-          achievement_manager_.get(),
+          kernel_state->emulator(), achievement_manager_.get(),
           kernel_state->emulator() ? kernel_state->emulator()->user_data_root()
                                    : std::filesystem::path{})) {}
 
@@ -80,8 +78,7 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
         for (uint32_t i = 0; i < achievement_count; ++i) {
           // uint32_t user_index = memory::load_and_swap<uint32_t>(
           //     achievements_data + i * 8 + 0);
-          uint32_t achievement_id = memory::load_and_swap<uint32_t>(
-              achievements_data + i * 8 + 4);
+          uint32_t achievement_id = memory::load_and_swap<uint32_t>(achievements_data + i * 8 + 4);
           ids.push_back(achievement_id);
         }
 
@@ -105,15 +102,12 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
                 if (a.id == id) {
                   std::string label = a.label;
                   uint16_t gs = a.gamerscore;
-                  std::vector<uint8_t> icon =
-                      achievement_manager->GetAchievementIconPng(id);
-                  app_context->CallInUIThread(
-                      [imgui_drawer, label = std::move(label), gs,
-                       icon = std::move(icon)]() mutable {
-                        new rex::ui::AchievementToast(
-                            imgui_drawer, std::move(label), gs,
-                            std::move(icon));
-                      });
+                  std::vector<uint8_t> icon = achievement_manager->GetAchievementIconPng(id);
+                  app_context->CallInUIThread([imgui_drawer, label = std::move(label), gs,
+                                               icon = std::move(icon)]() mutable {
+                    new rex::ui::AchievementToast(imgui_drawer, std::move(label), gs,
+                                                  std::move(icon));
+                  });
                   break;
                 }
               }

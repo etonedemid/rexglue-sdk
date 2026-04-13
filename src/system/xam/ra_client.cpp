@@ -40,8 +40,8 @@ namespace rex::system::xam {
 // Logging helpers
 // ============================================================================
 
-#define REXRA_INFO(fmt, ...)  REXSYS_INFO("[RA] " fmt, ##__VA_ARGS__)
-#define REXRA_WARN(fmt, ...)  REXSYS_WARN("[RA] " fmt, ##__VA_ARGS__)
+#define REXRA_INFO(fmt, ...) REXSYS_INFO("[RA] " fmt, ##__VA_ARGS__)
+#define REXRA_WARN(fmt, ...) REXSYS_WARN("[RA] " fmt, ##__VA_ARGS__)
 #define REXRA_ERROR(fmt, ...) REXSYS_ERROR("[RA] " fmt, ##__VA_ARGS__)
 #define REXRA_DEBUG(fmt, ...) REXSYS_DEBUG("[RA] " fmt, ##__VA_ARGS__)
 
@@ -49,8 +49,8 @@ namespace rex::system::xam {
 // exposing rcheevos types through the public header.
 struct RAClient::HttpRequest {
   std::string url;
-  std::string post_data;    // empty string → GET request
-  std::string content_type; // default "application/x-www-form-urlencoded"
+  std::string post_data;     // empty string → GET request
+  std::string content_type;  // default "application/x-www-form-urlencoded"
   rc_client_server_callback_t callback;
   void* callback_data;
 };
@@ -72,9 +72,8 @@ struct RAClientCallbacks {
     return num_bytes;
   }
 
-  static void ServerCall(const rc_api_request_t* request,
-                         rc_client_server_callback_t callback, void* callback_data,
-                         rc_client_t* client) {
+  static void ServerCall(const rc_api_request_t* request, rc_client_server_callback_t callback,
+                         void* callback_data, rc_client_t* client) {
     auto* self = static_cast<RAClient*>(rc_client_get_userdata(client));
     if (!self) {
       rc_api_server_response_t resp{};
@@ -86,10 +85,9 @@ struct RAClientCallbacks {
     RAClient::HttpRequest req;
     req.url = request->url ? request->url : "";
     req.post_data = (request->post_data && request->post_data[0]) ? request->post_data : "";
-    req.content_type =
-        (request->content_type && request->content_type[0])
-            ? request->content_type
-            : "application/x-www-form-urlencoded";
+    req.content_type = (request->content_type && request->content_type[0])
+                           ? request->content_type
+                           : "application/x-www-form-urlencoded";
     req.callback = callback;
     req.callback_data = callback_data;
 
@@ -98,7 +96,8 @@ struct RAClientCallbacks {
 
   static void EventHandler(const rc_client_event_t* event, rc_client_t* client) {
     auto* self = static_cast<RAClient*>(rc_client_get_userdata(client));
-    if (!self || !event) return;
+    if (!self || !event)
+      return;
 
     switch (event->type) {
       case RC_CLIENT_EVENT_ACHIEVEMENT_TRIGGERED:
@@ -200,11 +199,10 @@ void RAClient::LoadGame(const std::string& xex_path, uint32_t title_id) {
         auto* self = static_cast<RAClient*>(rc_client_get_userdata(client));
         if (result == RC_OK) {
           const rc_client_game_t* game = rc_client_get_game_info(client);
-          REXRA_INFO("game loaded: {} (id={})", game ? game->title : "?",
-                     game ? game->id : 0);
+          REXRA_INFO("game loaded: {} (id={})", game ? game->title : "?", game ? game->id : 0);
         } else {
-          REXRA_WARN("game load failed: {} (code={})",
-                     error_message ? error_message : "unknown", result);
+          REXRA_WARN("game load failed: {} (code={})", error_message ? error_message : "unknown",
+                     result);
           (void)self;
         }
       },
@@ -228,9 +226,10 @@ void RAClient::Reset() {
 // ============================================================================
 
 void RAClient::LoginWithPassword(const std::string& username, const std::string& password,
-                                  LoginCallback callback) {
+                                 LoginCallback callback) {
   if (!client_) {
-    if (callback) callback(false, "RAClient not initialized");
+    if (callback)
+      callback(false, "RAClient not initialized");
     return;
   }
 
@@ -260,16 +259,18 @@ void RAClient::LoginWithPassword(const std::string& username, const std::string&
           REXRA_WARN("login failed: {}", msg);
         }
 
-        if (d->cb) d->cb(ok, msg);
+        if (d->cb)
+          d->cb(ok, msg);
         delete d;
       },
       data);
 }
 
 void RAClient::LoginWithToken(const std::string& username, const std::string& token,
-                               LoginCallback callback) {
+                              LoginCallback callback) {
   if (!client_) {
-    if (callback) callback(false, "RAClient not initialized");
+    if (callback)
+      callback(false, "RAClient not initialized");
     return;
   }
 
@@ -300,7 +301,8 @@ void RAClient::LoginWithToken(const std::string& username, const std::string& to
           self->ClearCredentials();
         }
 
-        if (d->cb) d->cb(ok, msg);
+        if (d->cb)
+          d->cb(ok, msg);
         delete d;
       },
       data);
@@ -315,13 +317,15 @@ void RAClient::Logout() {
 }
 
 bool RAClient::IsLoggedIn() const {
-  if (!client_) return false;
+  if (!client_)
+    return false;
   const rc_client_user_t* user = rc_client_get_user_info(client_);
   return user != nullptr;
 }
 
 std::string RAClient::GetDisplayUsername() const {
-  if (!client_) return {};
+  if (!client_)
+    return {};
   const rc_client_user_t* user = rc_client_get_user_info(client_);
   return user ? std::string(user->display_name) : std::string();
 }
@@ -334,14 +338,15 @@ std::string RAClient::GetDisplayUsername() const {
 
 void RAClient::OnAchievementTriggered(const void* event_ptr) {
   const auto* event = static_cast<const rc_client_event_t*>(event_ptr);
-  if (!event || !event->achievement) return;
+  if (!event || !event->achievement)
+    return;
 
   const char* title = event->achievement->title;
   uint32_t points = event->achievement->points;
   uint32_t ra_id = event->achievement->id;
 
-  REXRA_INFO("achievement triggered: \"{}\" (+{} pts, ra_id={})",
-             title ? title : "?", points, ra_id);
+  REXRA_INFO("achievement triggered: \"{}\" (+{} pts, ra_id={})", title ? title : "?", points,
+             ra_id);
 
   // Mirror into local AchievementManager if an entry with the same name exists.
   // (RA ids don't match Xbox achievement ids, so we match by title string.)
@@ -356,10 +361,12 @@ void RAClient::OnAchievementTriggered(const void* event_ptr) {
   }
 
   // Show an achievement toast in the UI thread.
-  if (!emulator_) return;
+  if (!emulator_)
+    return;
   auto* app_context = emulator_->app_context();
   auto* imgui_drawer = emulator_->imgui_drawer();
-  if (!app_context || !imgui_drawer) return;
+  if (!app_context || !imgui_drawer)
+    return;
 
   std::string label = title ? title : "Achievement Unlocked";
   uint16_t gs = static_cast<uint16_t>(points);
@@ -377,10 +384,8 @@ void RAClient::OnAchievementTriggered(const void* event_ptr) {
   }
 
   app_context->CallInUIThread(
-      [imgui_drawer, label = std::move(label), gs,
-       icon = std::move(icon)]() mutable {
-        new rex::ui::AchievementToast(imgui_drawer, std::move(label), gs,
-                                      std::move(icon));
+      [imgui_drawer, label = std::move(label), gs, icon = std::move(icon)]() mutable {
+        new rex::ui::AchievementToast(imgui_drawer, std::move(label), gs, std::move(icon));
       });
 }
 
@@ -455,8 +460,7 @@ void RAClient::RunHttpThread() {
     struct curl_slist* headers = nullptr;
     if (!req.post_data.empty()) {
       curl_easy_setopt(curl, CURLOPT_POSTFIELDS, req.post_data.c_str());
-      curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,
-                       static_cast<long>(req.post_data.size()));
+      curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(req.post_data.size()));
       std::string ct_header = fmt::format("Content-Type: {}", req.content_type);
       headers = curl_slist_append(headers, ct_header.c_str());
       curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -503,17 +507,17 @@ void RAClient::LoadSavedCredentials() {
 
   if (!username.empty() && !token.empty()) {
     REXRA_INFO("auto-login with saved credentials for '{}'", username);
-    LoginWithToken(username, token,
-                   [](bool ok, const std::string& msg) {
-                     if (!ok) {
-                       REXRA_WARN("auto-login failed: {}", msg);
-                     }
-                   });
+    LoginWithToken(username, token, [](bool ok, const std::string& msg) {
+      if (!ok) {
+        REXRA_WARN("auto-login failed: {}", msg);
+      }
+    });
   }
 }
 
 void RAClient::SaveCredentials(const std::string& username, const std::string& token) {
-  if (user_data_root_.empty()) return;
+  if (user_data_root_.empty())
+    return;
   std::filesystem::create_directories(user_data_root_);
   auto path = user_data_root_ / "ra_credentials.txt";
   std::ofstream f(path, std::ios::trunc);

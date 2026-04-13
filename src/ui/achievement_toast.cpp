@@ -26,8 +26,7 @@
 namespace rex::ui {
 
 AchievementToast::AchievementToast(ImGuiDrawer* imgui_drawer, std::string title,
-                                   uint16_t gamerscore,
-                                   std::vector<uint8_t> icon_png,
+                                   uint16_t gamerscore, std::vector<uint8_t> icon_png,
                                    float duration_seconds)
     : ImGuiDialog(imgui_drawer),
       title_(std::move(title)),
@@ -54,12 +53,10 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
       banner_decoded_ = true;
       int w = 0, h = 0, channels = 0;
       unsigned char* rgba = stbi_load_from_memory(
-          kAchievementImageData, static_cast<int>(kAchievementImageSize),
-          &w, &h, &channels, 4);
+          kAchievementImageData, static_cast<int>(kAchievementImageSize), &w, &h, &channels, 4);
       if (rgba && w > 0 && h > 0 && drawer) {
-        banner_texture_ = drawer->CreateTexture(
-            static_cast<uint32_t>(w), static_cast<uint32_t>(h),
-            ImmediateTextureFilter::kLinear, false, rgba);
+        banner_texture_ = drawer->CreateTexture(static_cast<uint32_t>(w), static_cast<uint32_t>(h),
+                                                ImmediateTextureFilter::kLinear, false, rgba);
         stbi_image_free(rgba);
       }
     }
@@ -69,12 +66,10 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
       icon_decoded_ = true;
       int w = 0, h = 0, channels = 0;
       unsigned char* rgba = stbi_load_from_memory(
-          icon_png_.data(), static_cast<int>(icon_png_.size()),
-          &w, &h, &channels, 4);
+          icon_png_.data(), static_cast<int>(icon_png_.size()), &w, &h, &channels, 4);
       if (rgba && w > 0 && h > 0 && drawer) {
-        icon_texture_ = drawer->CreateTexture(
-            static_cast<uint32_t>(w), static_cast<uint32_t>(h),
-            ImmediateTextureFilter::kLinear, false, rgba);
+        icon_texture_ = drawer->CreateTexture(static_cast<uint32_t>(w), static_cast<uint32_t>(h),
+                                              ImmediateTextureFilter::kLinear, false, rgba);
         stbi_image_free(rgba);
       }
       icon_png_.clear();
@@ -85,12 +80,10 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
     SDL_AudioSpec spec;
     uint8_t* audio_buf = nullptr;
     uint32_t audio_len = 0;
-    SDL_IOStream* io_stream =
-        SDL_IOFromConstMem(kAchievementSoundData, kAchievementSoundSize);
-    if (io_stream &&
-        SDL_LoadWAV_IO(io_stream, /*closeio=*/true, &spec, &audio_buf, &audio_len)) {
-      audio_stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-                                                &spec, nullptr, nullptr);
+    SDL_IOStream* io_stream = SDL_IOFromConstMem(kAchievementSoundData, kAchievementSoundSize);
+    if (io_stream && SDL_LoadWAV_IO(io_stream, /*closeio=*/true, &spec, &audio_buf, &audio_len)) {
+      audio_stream_ =
+          SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
       if (audio_stream_) {
         SDL_PutAudioStreamData(audio_stream_, audio_buf, static_cast<int>(audio_len));
         SDL_ResumeAudioStreamDevice(audio_stream_);
@@ -100,8 +93,7 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
   }
 
   auto elapsed = std::chrono::steady_clock::now() - start_time_;
-  float elapsed_sec =
-      std::chrono::duration_cast<std::chrono::duration<float>>(elapsed).count();
+  float elapsed_sec = std::chrono::duration_cast<std::chrono::duration<float>>(elapsed).count();
 
   if (elapsed_sec >= duration_seconds_) {
     Close();
@@ -143,12 +135,9 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
     // Draw the achievement.png banner as background.
     if (banner_texture_) {
       ImGui::SetCursorPos(ImVec2(0.0f, 0.0f));
-      ImGui::ImageWithBg(
-          reinterpret_cast<ImTextureID>(banner_texture_.get()),
-          ImVec2(kBannerWidth, kBannerHeight),
-          ImVec2(0, 0), ImVec2(1, 1),
-          ImVec4(0, 0, 0, 0),
-          ImVec4(1, 1, 1, alpha));
+      ImGui::ImageWithBg(reinterpret_cast<ImTextureID>(banner_texture_.get()),
+                         ImVec2(kBannerWidth, kBannerHeight), ImVec2(0, 0), ImVec2(1, 1),
+                         ImVec4(0, 0, 0, 0), ImVec4(1, 1, 1, alpha));
     }
 
     // Render per-achievement icon as a circle in the left area of the banner.
@@ -164,12 +153,9 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
 
       // AddImageRounded with rounding == radius produces a perfect circle clip.
       ImGui::GetWindowDrawList()->AddImageRounded(
-          reinterpret_cast<ImTextureID>(icon_texture_.get()),
-          ImVec2(abs_x, abs_y),
-          ImVec2(abs_x + kIconSize, abs_y + kIconSize),
-          ImVec2(0, 0), ImVec2(1, 1),
-          ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)),
-          kRadius);
+          reinterpret_cast<ImTextureID>(icon_texture_.get()), ImVec2(abs_x, abs_y),
+          ImVec2(abs_x + kIconSize, abs_y + kIconSize), ImVec2(0, 0), ImVec2(1, 1),
+          ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)), kRadius);
     }
 
     // Overlay gamerscore + title text. The icon area ends at ~23% from left.
@@ -178,11 +164,11 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
     float text_y = win_pos.y + kBannerHeight * 0.55f;
 
     ImFont* font = imgui_drawer()->ui_font();
-    if (!font) font = ImGui::GetFont();
+    if (!font)
+      font = ImGui::GetFont();
     constexpr float kTextSize = 13.0f;
     ImGui::GetWindowDrawList()->AddText(
-        font, kTextSize,
-        ImVec2(text_x, text_y),
+        font, kTextSize, ImVec2(text_x, text_y),
         ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)),
         (std::to_string(gamerscore_) + " G - " + title_).c_str());
   }

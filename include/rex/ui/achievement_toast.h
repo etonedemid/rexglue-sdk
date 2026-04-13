@@ -27,10 +27,8 @@ namespace rex::ui {
 // circular area of the banner. Empty vector → no icon overlay.
 class AchievementToast : public ImGuiDialog {
  public:
-  AchievementToast(ImGuiDrawer* imgui_drawer, std::string title,
-                   uint16_t gamerscore,
-                   std::vector<uint8_t> icon_png = {},
-                   float duration_seconds = 5.0f);
+  AchievementToast(ImGuiDrawer* imgui_drawer, std::string title, uint16_t gamerscore,
+                   std::vector<uint8_t> icon_png = {}, float duration_seconds = 5.0f);
   ~AchievementToast();
 
  protected:
