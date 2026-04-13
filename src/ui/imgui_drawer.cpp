@@ -23,6 +23,7 @@
 #include <rex/ui/window.h>
 
 #include <imgui.h>
+#include <SDL3/SDL_gamepad.h>
 
 namespace rex {
 namespace ui {
@@ -104,6 +105,9 @@ void ImGuiDrawer::Initialize() {
   // imgui assumes paths are char* so we can't throw a good path at it on
   // Windows.
   io.IniFilename = nullptr;
+
+  // Enable gamepad navigation for dialogs.
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
   // Setup the font glyphs.
   ImFontConfig font_config;
@@ -379,6 +383,57 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
   float physical_to_logical = float(window_->GetMediumDpi()) / float(window_->GetDpi());
   io.DisplaySize.x = window_->GetActualPhysicalWidth() * physical_to_logical;
   io.DisplaySize.y = window_->GetActualPhysicalHeight() * physical_to_logical;
+
+  // Poll SDL gamepad state and feed to ImGui navigation.
+  // Use SDL_OpenGamepad for a ref-counted handle that works regardless of
+  // whether the SDL input driver has already opened the gamepad.
+  {
+    int gamepad_count = 0;
+    SDL_JoystickID* gamepad_ids = SDL_GetGamepads(&gamepad_count);
+    SDL_Gamepad* gp = nullptr;
+    if (gamepad_ids && gamepad_count > 0) {
+      // SDL_OpenGamepad is ref-counted: safe even if already opened elsewhere.
+      gp = SDL_OpenGamepad(gamepad_ids[0]);
+    }
+    SDL_free(gamepad_ids);
+    if (gp) {
+      io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
+    } else {
+      io.BackendFlags &= ~ImGuiBackendFlags_HasGamepad;
+    }
+    if (gp) {
+      auto btn = [&](ImGuiKey k, SDL_GamepadButton b) {
+        io.AddKeyEvent(k, SDL_GetGamepadButton(gp, b));
+      };
+      btn(ImGuiKey_GamepadDpadUp, SDL_GAMEPAD_BUTTON_DPAD_UP);
+      btn(ImGuiKey_GamepadDpadDown, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+      btn(ImGuiKey_GamepadDpadLeft, SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+      btn(ImGuiKey_GamepadDpadRight, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+      btn(ImGuiKey_GamepadFaceDown, SDL_GAMEPAD_BUTTON_SOUTH);  // A = activate
+      btn(ImGuiKey_GamepadFaceRight, SDL_GAMEPAD_BUTTON_EAST);  // B = back/close
+      btn(ImGuiKey_GamepadFaceLeft, SDL_GAMEPAD_BUTTON_WEST);   // X
+      btn(ImGuiKey_GamepadFaceUp, SDL_GAMEPAD_BUTTON_NORTH);    // Y
+      btn(ImGuiKey_GamepadStart, SDL_GAMEPAD_BUTTON_START);
+      btn(ImGuiKey_GamepadBack, SDL_GAMEPAD_BUTTON_BACK);
+      btn(ImGuiKey_GamepadL1, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+      btn(ImGuiKey_GamepadR1, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+      // Triggers (analog)
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadL2,
+                           SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 0,
+                           SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f);
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadR2,
+                           SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 0,
+                           SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f);
+      // Left stick (analog, normalized to 0..1 per direction)
+      Sint16 lx = SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTX);
+      Sint16 ly = SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTY);
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadLStickLeft, lx < 0, lx < 0 ? -lx / 32767.0f : 0.f);
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadLStickRight, lx > 0, lx > 0 ? lx / 32767.0f : 0.f);
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadLStickUp, ly < 0, ly < 0 ? -ly / 32767.0f : 0.f);
+      io.AddKeyAnalogEvent(ImGuiKey_GamepadLStickDown, ly > 0, ly > 0 ? ly / 32767.0f : 0.f);
+      SDL_CloseGamepad(gp);  // Release our ref; input driver still holds its own ref.
+    }
+  }
 
   ImGui::NewFrame();
 
