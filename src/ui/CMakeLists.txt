@@ -11,7 +11,6 @@ set(REXUI_CORE_SOURCES
     keybinds.cpp
     menu_item.cpp
     presenter.cpp
-    renderdoc_api.cpp
     window.cpp
     windowed_app.cpp
     windowed_app_context.cpp
