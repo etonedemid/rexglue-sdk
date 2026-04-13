@@ -291,8 +291,20 @@ bool VulkanPipelineCache::Initialize() {
   bool edram_fragment_shader_interlock =
       render_target_cache_.GetPath() == RenderTargetCache::Path::kPixelShaderInterlock;
 
+  SpirvShaderTranslator::Features translator_features(vulkan_device);
+
+  // When FSI is active, suppress demote_to_helper_invocation.
+  // The FSI alpha test path via OpDemoteToHelperInvocationEXT + OpIsHelperInvocationEXT
+  // is unreliable on NVIDIA (SPIR-V 1.5): demoted invocations may not be properly
+  // flagged, causing alpha-killed pixels to write their output colour to EDRAM.
+  // The non-DemoteToHelper path directly zeroes fsi_sample_mask_in_rt_0_alpha_tests,
+  // which is correct and avoids the driver query entirely.
+  if (edram_fragment_shader_interlock) {
+    translator_features.demote_to_helper_invocation = false;
+  }
+
   shader_translator_ = std::make_unique<SpirvShaderTranslator>(
-      SpirvShaderTranslator::Features(vulkan_device),
+      translator_features,
       render_target_cache_.msaa_2x_attachments_supported(),
       render_target_cache_.msaa_2x_no_attachments_supported(), edram_fragment_shader_interlock,
       render_target_cache_.draw_resolution_scale_x(),
