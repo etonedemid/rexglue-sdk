@@ -20,10 +20,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <string_view>
 
 #if REX_PLATFORM_WIN32
 #include <rex/ui/window_win.h>
-#include <Windows.h>
+#include <windows.h>
+#elif REX_PLATFORM_GNU_LINUX
+#include <rex/ui/window_gtk.h>
+#if defined(GDK_WINDOWING_X11) && defined(REX_INPUT_HAS_X11)
+#include <gdk/gdkx.h>
+#include <X11/Xlib.h>
+#endif
 #endif
 
 REXCVAR_DEFINE_BOOL(mnk_mode, false, "Input", "Enable keyboard/mouse controller emulation");
@@ -80,6 +87,22 @@ void MnkInputDriver::OnWindowAvailable(rex::ui::Window* window) {
     attached_window_ = window;
     window->AddInputListener(this, window_z_order());
     window->AddListener(this);
+
+#if REX_PLATFORM_GNU_LINUX
+    // Detect whether pointer warping is supported (X11 yes, Wayland no).
+    // GDK_IS_X11_DISPLAY would be ideal but requires GTK headers in rexinput.
+    // Instead check environment: if XDG_SESSION_TYPE is "x11" or
+    // WAYLAND_DISPLAY is unset, we're likely on X11.
+    {
+      const char* session_type = std::getenv("XDG_SESSION_TYPE");
+      const char* wayland_display = std::getenv("WAYLAND_DISPLAY");
+      if (session_type && std::string_view(session_type) == "x11") {
+        can_warp_pointer_ = true;
+      } else if (!wayland_display || wayland_display[0] == '\0') {
+        can_warp_pointer_ = true;  // Assume X11 if no Wayland evidence
+      }
+    }
+#endif
   }
 }
 
@@ -105,11 +128,28 @@ bool MnkInputDriver::IsEnabled() const {
 }
 
 static bool IsBindPressed(const bool (&key_down)[256], const std::string& cvar_val) {
-  VirtualKey vk = rex::ui::ParseVirtualKey(cvar_val);
-  if (vk == VirtualKey::kNone)
-    return false;
-  uint16_t idx = static_cast<uint16_t>(vk);
-  return idx < 256 && key_down[idx];
+  // Support comma-separated keys (e.g. "Space,Return")
+  std::string::size_type start = 0;
+  while (start < cvar_val.size()) {
+    auto comma = cvar_val.find(',', start);
+    std::string token = cvar_val.substr(start, comma == std::string::npos ? comma : comma - start);
+    // Trim whitespace
+    auto b = token.find_first_not_of(' ');
+    auto e = token.find_last_not_of(' ');
+    if (b != std::string::npos) {
+      token = token.substr(b, e - b + 1);
+    }
+    VirtualKey vk = rex::ui::ParseVirtualKey(token);
+    if (vk != VirtualKey::kNone) {
+      uint16_t idx = static_cast<uint16_t>(vk);
+      if (idx < 256 && key_down[idx])
+        return true;
+    }
+    if (comma == std::string::npos)
+      break;
+    start = comma + 1;
+  }
+  return false;
 }
 
 X_RESULT MnkInputDriver::GetCapabilities(uint32_t user_index, uint32_t flags,
@@ -260,11 +300,11 @@ void MnkInputDriver::EnqueueKeystroke(uint16_t vk_pad, bool down) {
 void MnkInputDriver::CenterCursor() {
   if (!attached_window_)
     return;
+#if REX_PLATFORM_WIN32
   int32_t cx = static_cast<int32_t>(attached_window_->GetActualLogicalWidth() / 2);
   int32_t cy = static_cast<int32_t>(attached_window_->GetActualLogicalHeight() / 2);
   prev_mouse_x_ = cx;
   prev_mouse_y_ = cy;
-#if REX_PLATFORM_WIN32
   auto* win32_window = dynamic_cast<rex::ui::Win32Window*>(attached_window_);
   if (win32_window && win32_window->hwnd()) {
     POINT pt = {static_cast<LONG>(cx), static_cast<LONG>(cy)};
@@ -272,6 +312,10 @@ void MnkInputDriver::CenterCursor() {
     SetCursorPos(pt.x, pt.y);
   }
 #endif
+  // On Linux, cursor warping is done from OnMouseMove (UI thread) to avoid
+  // X11 threading deadlocks.  prev_mouse coords are NOT updated here
+  // because the warp may not actually occur (e.g. Wayland) and touching
+  // prev_mouse without the lock is a data race.
 }
 
 void MnkInputDriver::UpdateMouseCapture() {
@@ -362,13 +406,52 @@ void MnkInputDriver::OnMouseUp(rex::ui::MouseEvent& e) {
 void MnkInputDriver::OnMouseMove(rex::ui::MouseEvent& e) {
   if (!IsEnabled() || !has_focus_)
     return;
-  std::lock_guard lock(state_mutex_);
-  int32_t x = e.x();
-  int32_t y = e.y();
-  mouse_dx_ += x - prev_mouse_x_;
-  mouse_dy_ += y - prev_mouse_y_;
-  prev_mouse_x_ = x;
-  prev_mouse_y_ = y;
+
+#if REX_PLATFORM_GNU_LINUX
+  bool do_warp = false;
+  int32_t warp_x = 0, warp_y = 0;
+#endif
+
+  {
+    std::lock_guard lock(state_mutex_);
+    int32_t x = e.x();
+    int32_t y = e.y();
+    mouse_dx_ += x - prev_mouse_x_;
+    mouse_dy_ += y - prev_mouse_y_;
+    prev_mouse_x_ = x;
+    prev_mouse_y_ = y;
+
+#if REX_PLATFORM_GNU_LINUX
+    // On X11, warp the cursor back to center from the UI thread to avoid
+    // threading deadlocks.  On Wayland warping is not possible, so we just
+    // track raw deltas (prev_mouse follows the real cursor position).
+    if (mouse_captured_ && attached_window_ && can_warp_pointer_) {
+      warp_x = static_cast<int32_t>(attached_window_->GetActualLogicalWidth() / 2);
+      warp_y = static_cast<int32_t>(attached_window_->GetActualLogicalHeight() / 2);
+      if (x != warp_x || y != warp_y) {
+        prev_mouse_x_ = warp_x;
+        prev_mouse_y_ = warp_y;
+        do_warp = true;
+      }
+    }
+#endif
+  }
+
+#if REX_PLATFORM_GNU_LINUX && defined(REX_INPUT_HAS_X11)
+  if (do_warp) {
+    auto* gtk_window = dynamic_cast<rex::ui::GTKWindow*>(attached_window_);
+    if (gtk_window && gtk_window->window()) {
+      GdkDisplay* display = gtk_widget_get_display(gtk_window->window());
+      if (GDK_IS_X11_DISPLAY(display)) {
+        Display* xdisplay = gdk_x11_display_get_xdisplay(display);
+        GdkWindow* gdk_win = gtk_widget_get_window(gtk_window->window());
+        Window xwindow = gdk_x11_window_get_xid(gdk_win);
+        XWarpPointer(xdisplay, None, xwindow, 0, 0, 0, 0, warp_x, warp_y);
+        XFlush(xdisplay);
+      }
+    }
+  }
+#endif
 }
 
 void MnkInputDriver::OnLostFocus(rex::ui::UISetupEvent&) {

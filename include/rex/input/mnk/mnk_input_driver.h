@@ -70,6 +70,9 @@ class MnkInputDriver final : public InputDriver,
   int32_t prev_mouse_y_ = 0;
   bool mouse_captured_ = false;
   bool has_focus_ = true;
+#if REX_PLATFORM_GNU_LINUX
+  bool can_warp_pointer_ = false;  // true on X11, false on Wayland
+#endif
 
   // Keystroke queue
   std::queue<X_INPUT_KEYSTROKE> keystroke_queue_;
