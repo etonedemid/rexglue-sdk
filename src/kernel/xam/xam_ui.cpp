@@ -15,6 +15,7 @@
 #include <rex/string/util.h>
 #include <rex/system/flags.h>
 #include <rex/system/kernel_state.h>
+#include <rex/kernel/xam/apps/xgi_app.h>
 #include <rex/system/xam/achievement_manager.h>
 #include <rex/system/xam/ra_client.h>
 
@@ -810,9 +811,12 @@ class AchievementsDialog : public XamDialog {
         it->second.data(), static_cast<int>(it->second.size()),
         &w, &h, &channels, 4);
     if (rgba && w > 0 && h > 0) {
-      icon_textures_[achievement_id] = imgui_drawer()->CreateTexture(
-          static_cast<uint32_t>(w), static_cast<uint32_t>(h),
-          rex::ui::ImmediateTextureFilter::kLinear, false, rgba);
+      auto* drawer = imgui_drawer()->immediate_drawer();
+      if (drawer) {
+        icon_textures_[achievement_id] = drawer->CreateTexture(
+            static_cast<uint32_t>(w), static_cast<uint32_t>(h),
+            rex::ui::ImmediateTextureFilter::kLinear, false, rgba);
+      }
       stbi_image_free(rgba);
     }
     it->second.clear();  // Free PNG data after decoding.
@@ -836,10 +840,11 @@ ppc_u32_result_t XamShowAchievementsUI_entry(ppc_u32_t user_index, ppc_pvoid_t o
   if (!imgui_drawer) {
     return X_ERROR_FUNCTION_FAILED;
   }
-  // Capture manager and RAClient on the PPC thread.
-  // Do NOT access REX_KERNEL_STATE() from inside OnDraw (runs on UI thread).
-  auto* mgr = REX_KERNEL_STATE()->achievement_manager();
-  auto* ra = REX_KERNEL_STATE()->ra_client();
+  // Get managers via XgiApp (which owns AchievementManager and RAClient).
+  auto* xgi_app = static_cast<rex::kernel::xam::apps::XgiApp*>(
+      REX_KERNEL_STATE()->app_manager()->FindById(0xFB));
+  auto* mgr = xgi_app ? xgi_app->achievement_manager() : nullptr;
+  auto* ra  = xgi_app ? xgi_app->ra_client() : nullptr;
   // Pre-extract icon PNG data on PPC thread (safe to access XDBF here).
   std::unordered_map<uint32_t, std::vector<uint8_t>> icon_data;
   if (mgr) {

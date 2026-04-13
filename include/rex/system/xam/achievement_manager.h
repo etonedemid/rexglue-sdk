@@ -58,7 +58,11 @@ class AchievementManager {
   uint64_t GetUnlockTime(uint32_t id) const;
 
   // Get all achievement states for the current title.
-  const std::vector<AchievementState>& achievements() const { return achievements_; }
+  // Lazily loads from XDBF on first call if not yet loaded.
+  const std::vector<AchievementState>& achievements() {
+    if (!loaded_) LoadTitleAchievements();
+    return achievements_;
+  }
 
   // Total unlocked gamerscore for the current title.
   uint32_t GetTotalUnlockedGamerscore() const;

@@ -25,6 +25,11 @@ void AppManager::RegisterApp(std::unique_ptr<App> app) {
   apps_.push_back(std::move(app));
 }
 
+App* AppManager::FindById(uint32_t app_id) const {
+  const auto it = app_lookup_.find(app_id);
+  return it != app_lookup_.end() ? it->second : nullptr;
+}
+
 X_HRESULT AppManager::DispatchMessageSync(uint32_t app_id, uint32_t message, uint32_t buffer_ptr,
                                           uint32_t buffer_length) {
   const auto& it = app_lookup_.find(app_id);
