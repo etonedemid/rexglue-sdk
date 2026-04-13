@@ -308,6 +308,13 @@ std::optional<ImGuiKey> ImGuiDrawer::VirtualKeyToImGuiKey(VirtualKey vkey) {
   }
 }
 
+std::unique_ptr<ImmediateTexture> ImGuiDrawer::CreateTexture(
+    uint32_t width, uint32_t height, ImmediateTextureFilter filter,
+    bool is_dynamic, const uint8_t* data) {
+  if (!immediate_drawer_) return nullptr;
+  return immediate_drawer_->CreateTexture(width, height, filter, is_dynamic, data);
+}
+
 void ImGuiDrawer::SetupFontTexture() {
   if (font_texture_ || !immediate_drawer_) {
     return;
