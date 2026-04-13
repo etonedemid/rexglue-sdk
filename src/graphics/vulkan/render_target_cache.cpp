@@ -203,6 +203,9 @@ bool VulkanRenderTargetCache::Initialize(uint32_t shared_memory_binding_count) {
   const VkDevice device = vulkan_device->device();
   const ui::vulkan::VulkanDevice::Properties& device_properties = vulkan_device->properties();
 
+  // Cache the SPIR-V version for utility shader creation.
+  spirv_version_ = SpirvShaderTranslator::Features(vulkan_device).spirv_version;
+
   bool fsi_path_supported =
       (device_properties.fragmentShaderSampleInterlock ||
        device_properties.fragmentShaderPixelInterlock) &&
@@ -253,6 +256,11 @@ bool VulkanRenderTargetCache::Initialize(uint32_t shared_memory_binding_count) {
                                           &depth_unorm24_properties);
   depth_unorm24_vulkan_format_supported_ = (depth_unorm24_properties.optimalTilingFeatures &
                                             kUsedDepthFormatFeatures) == kUsedDepthFormatFeatures;
+  if (!depth_unorm24_vulkan_format_supported_) {
+    REXGPU_WARN(
+        "VulkanRenderTargetCache: D24_UNORM_S8_UINT unavailable; "
+        "falling back to D32_SFLOAT_S8_UINT — depth precision will differ from Xbox 360");
+  }
   VkFormatProperties color_rg16_snorm_properties;
   ifn.vkGetPhysicalDeviceFormatProperties(physical_device, VK_FORMAT_R16G16_SNORM,
                                           &color_rg16_snorm_properties);
@@ -1341,6 +1349,12 @@ bool VulkanRenderTargetCache::Resolve(const memory::Memory& memory,
   if (!draw_util::GetResolveInfo(register_file(), memory, trace_writer_, draw_resolution_scale_x(),
                                  draw_resolution_scale_y(), IsFixedRG16TruncatedToMinus1To1(),
                                  IsFixedRGBA16TruncatedToMinus1To1(), resolve_info)) {
+    static uint32_t resolve_fail_count = 0;
+    ++resolve_fail_count;
+    if (resolve_fail_count <= 5 || (resolve_fail_count % 1000 == 0)) {
+      REXGPU_ERROR("VulkanRenderTargetCache::Resolve: GetResolveInfo failed (occurrence #{})",
+                   resolve_fail_count);
+    }
     return false;
   }
 
@@ -1934,7 +1948,7 @@ VkFormat VulkanRenderTargetCache::GetColorVulkanFormat(
                                              : VK_FORMAT_R8G8B8A8_UNORM;
     case xenos::ColorRenderTargetFormat::k_2_10_10_10:
     case xenos::ColorRenderTargetFormat::k_2_10_10_10_AS_10_10_10_10:
-      return VK_FORMAT_A8B8G8R8_UNORM_PACK32;
+      return VK_FORMAT_A2B10G10R10_UNORM_PACK32;
     case xenos::ColorRenderTargetFormat::k_2_10_10_10_FLOAT:
     case xenos::ColorRenderTargetFormat::k_2_10_10_10_FLOAT_AS_16_16_16_16:
       return VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -2513,7 +2527,8 @@ VkShaderModule VulkanRenderTargetCache::GetTransferShader(TransferShaderKey key)
   std::vector<spv::Id> id_vector_temp;
   std::vector<unsigned int> uint_vector_temp;
 
-  SpirvBuilder builder(spv::Spv_1_0, (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1, nullptr);
+  SpirvBuilder builder(static_cast<spv::SpvVersion>(spirv_version_),
+                       (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1, nullptr);
   spv::Id ext_inst_glsl_std_450 = builder.import("GLSL.std.450");
   builder.addCapability(spv::CapabilityShader);
   builder.setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
@@ -5619,7 +5634,8 @@ VkPipeline VulkanRenderTargetCache::GetDumpPipeline(DumpPipelineKey key) {
 
   std::vector<spv::Id> id_vector_temp;
 
-  SpirvBuilder builder(spv::Spv_1_0, (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1, nullptr);
+  SpirvBuilder builder(static_cast<spv::SpvVersion>(spirv_version_),
+                       (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1, nullptr);
   spv::Id ext_inst_glsl_std_450 = builder.import("GLSL.std.450");
   builder.addCapability(spv::CapabilityShader);
   builder.setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);

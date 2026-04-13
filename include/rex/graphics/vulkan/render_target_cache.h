@@ -823,6 +823,7 @@ class VulkanRenderTargetCache final : public RenderTargetCache {
   bool gamma_render_target_as_unorm16_ = false;
 
   bool depth_unorm24_vulkan_format_supported_ = false;
+  uint32_t spirv_version_ = 0;
   bool depth_float24_round_ = false;
   bool depth_float24_convert_in_pixel_shader_ = false;
 
