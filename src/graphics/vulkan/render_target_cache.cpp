@@ -1352,12 +1352,11 @@ bool VulkanRenderTargetCache::Resolve(const memory::Memory& memory,
     static uint32_t resolve_fail_count = 0;
     ++resolve_fail_count;
     if (resolve_fail_count <= 5 || (resolve_fail_count % 1000 == 0)) {
-      REXGPU_ERROR("VulkanRenderTargetCache::Resolve: GetResolveInfo failed (occurrence #{})", resolve_fail_count);
+      REXGPU_ERROR("VulkanRenderTargetCache::Resolve: GetResolveInfo failed (occurrence #{})",
+                   resolve_fail_count);
     }
     return false;
   }
-
-  // Resolve logging removed — was spamming.
 
   // Nothing to copy/clear.
   if (!resolve_info.coordinate_info.width_div_8 || !resolve_info.height_div_8) {
@@ -2528,7 +2527,8 @@ VkShaderModule VulkanRenderTargetCache::GetTransferShader(TransferShaderKey key)
   std::vector<spv::Id> id_vector_temp;
   std::vector<unsigned int> uint_vector_temp;
 
-  SpirvBuilder builder(static_cast<spv::SpvVersion>(spirv_version_), (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1, nullptr);
+  SpirvBuilder builder(static_cast<spv::SpvVersion>(spirv_version_),
+                       (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1, nullptr);
   spv::Id ext_inst_glsl_std_450 = builder.import("GLSL.std.450");
   builder.addCapability(spv::CapabilityShader);
   builder.setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
@@ -5634,7 +5634,8 @@ VkPipeline VulkanRenderTargetCache::GetDumpPipeline(DumpPipelineKey key) {
 
   std::vector<spv::Id> id_vector_temp;
 
-  SpirvBuilder builder(static_cast<spv::SpvVersion>(spirv_version_), (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1, nullptr);
+  SpirvBuilder builder(static_cast<spv::SpvVersion>(spirv_version_),
+                       (SpirvShaderTranslator::kSpirvMagicToolId << 16) | 1, nullptr);
   spv::Id ext_inst_glsl_std_450 = builder.import("GLSL.std.450");
   builder.addCapability(spv::CapabilityShader);
   builder.setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
