@@ -205,6 +205,15 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
       return;
     }
   }
+
+  // No handler was able to handle this exception. On Linux, simply returning
+  // from the signal handler would re-execute the faulting instruction, creating
+  // an infinite loop. Reset to default handler and re-raise to get a proper crash.
+  REXLOG_ERROR("Unhandled {} at PC={:#x}, fault_address={:#x} - crashing",
+               signal_number == SIGSEGV ? "SIGSEGV" : "SIGILL", thread_context.rip,
+               signal_number == SIGSEGV ? reinterpret_cast<uint64_t>(signal_info->si_addr) : 0);
+  signal(signal_number, SIG_DFL);
+  raise(signal_number);
 }
 
 void ExceptionHandler::Install(Handler fn, void* data) {

@@ -31,6 +31,11 @@
 REXCVAR_DEFINE_BOOL(protect_zero, true, "Memory", "Protect the zero page from reads and writes")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+REXCVAR_DEFINE_STRING(null_page_fill, "zero", "Memory",
+                      "Fill pattern for the null page when readable: "
+                      "zero (0x00), cd (0xCD), off (no fill)")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 REXCVAR_DEFINE_BOOL(protect_on_release, false, "Memory",
                     "Protect released memory to prevent accesses");
 
@@ -185,6 +190,20 @@ bool Memory::Initialize() {
                               !REXCVAR_GET(protect_zero)
                                   ? memory::kMemoryProtectRead | memory::kMemoryProtectWrite
                                   : memory::kMemoryProtectNoAccess);
+
+  // When the null page is readable, optionally fill it with a non-zero
+  // pattern so that null-pointer dereferences don't silently return 0x00
+  // (which can cause data-dependent rendering bugs on Linux).
+  if (!REXCVAR_GET(protect_zero)) {
+    const auto fill = REXCVAR_GET(null_page_fill);
+    if (fill == "cd") {
+      std::memset(heaps_.v00000000.TranslateRelative(0), 0xCD, 0x10000);
+    } else if (fill == "zero") {
+      std::memset(heaps_.v00000000.TranslateRelative(0), 0x00, 0x10000);
+    }
+    // "off" or anything else: leave the page as-is.
+  }
+
   heaps_.physical.AllocFixed(0x1FFF0000, 0x10000, 0x10000, memory::kMemoryAllocationReserve,
                              memory::kMemoryProtectNoAccess);
 
