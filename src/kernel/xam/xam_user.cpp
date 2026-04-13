@@ -15,6 +15,7 @@
 #include <cstring>
 
 #include <rex/cvar.h>
+#include <rex/kernel/xam/apps/xgi_app.h>
 #include <rex/kernel/xam/private.h>
 #include <rex/logging.h>
 #include <rex/math.h>
@@ -645,7 +646,11 @@ ppc_u32_result_t XamUserCreateAchievementEnumerator_entry(ppc_u32_t title_id, pp
     const XLanguage language =
         db.GetExistingLanguage(static_cast<XLanguage>(REXCVAR_GET(user_language)));
     const std::vector<util::XdbfAchievementTableEntry> achievement_list = db.GetAchievements();
-    auto* achievement_manager = REX_KERNEL_STATE()->achievement_manager();
+    auto* achievement_manager = [&]() -> rex::system::xam::AchievementManager* {
+      auto* app = REX_KERNEL_STATE()->app_manager()->FindById(0xFB);
+      auto* xgi = static_cast<rex::kernel::xam::apps::XgiApp*>(app);
+      return xgi ? xgi->achievement_manager() : nullptr;
+    }();
 
     for (const util::XdbfAchievementTableEntry& entry : achievement_list) {
       uint32_t achievement_flags = entry.flags;

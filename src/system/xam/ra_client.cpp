@@ -364,9 +364,24 @@ void RAClient::OnAchievementTriggered(const void* event_ptr) {
   std::string label = title ? title : "Achievement Unlocked";
   uint16_t gs = static_cast<uint16_t>(points);
 
-  app_context->CallInUIThread([imgui_drawer, label = std::move(label), gs]() {
-    new rex::ui::AchievementToast(imgui_drawer, label, gs);
-  });
+  // Try to find the matching local achievement icon by title match.
+  std::vector<uint8_t> icon;
+  if (achievement_manager_) {
+    const auto& achievements = achievement_manager_->achievements();
+    for (const auto& a : achievements) {
+      if (title && a.label == title) {
+        icon = achievement_manager_->GetAchievementIconPng(a.id);
+        break;
+      }
+    }
+  }
+
+  app_context->CallInUIThread(
+      [imgui_drawer, label = std::move(label), gs,
+       icon = std::move(icon)]() mutable {
+        new rex::ui::AchievementToast(imgui_drawer, std::move(label), gs,
+                                      std::move(icon));
+      });
 }
 
 void RAClient::OnGameCompleted(const void* /*event_ptr*/) {

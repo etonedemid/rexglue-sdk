@@ -25,7 +25,15 @@ using namespace rex::system::xam;
 namespace apps {
 using namespace rex::system;
 
-XgiApp::XgiApp(KernelState* kernel_state) : App(kernel_state, 0xFB) {}
+XgiApp::XgiApp(KernelState* kernel_state)
+    : App(kernel_state, 0xFB),
+      achievement_manager_(
+          std::make_unique<system::xam::AchievementManager>(kernel_state)),
+      ra_client_(std::make_unique<system::xam::RAClient>(
+          kernel_state->emulator(),
+          achievement_manager_.get(),
+          kernel_state->emulator() ? kernel_state->emulator()->user_data_root()
+                                   : std::filesystem::path{})) {}
 
 // http://mb.mirage.org/bugzilla/xliveless/main.c
 
@@ -77,7 +85,7 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
           ids.push_back(achievement_id);
         }
 
-        auto* achievement_manager = kernel_state_->achievement_manager();
+        auto* achievement_manager = achievement_manager_.get();
         if (achievement_manager) {
           auto newly_unlocked = achievement_manager->UnlockAchievements(ids);
           for (uint32_t id : newly_unlocked) {
@@ -97,13 +105,14 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
                 if (a.id == id) {
                   std::string label = a.label;
                   uint16_t gs = a.gamerscore;
-                  auto icon = achievement_manager->GetAchievementIconPng(id);
+                  std::vector<uint8_t> icon =
+                      achievement_manager->GetAchievementIconPng(id);
                   app_context->CallInUIThread(
                       [imgui_drawer, label = std::move(label), gs,
                        icon = std::move(icon)]() mutable {
-                        // The toast self-destructs via ImGuiDialog mechanisms
-                        new rex::ui::AchievementToast(imgui_drawer, label, gs,
-                                                      std::move(icon));
+                        new rex::ui::AchievementToast(
+                            imgui_drawer, std::move(label), gs,
+                            std::move(icon));
                       });
                   break;
                 }

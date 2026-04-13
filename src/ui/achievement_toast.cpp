@@ -32,8 +32,8 @@ AchievementToast::AchievementToast(ImGuiDrawer* imgui_drawer, std::string title,
     : ImGuiDialog(imgui_drawer),
       title_(std::move(title)),
       gamerscore_(gamerscore),
-      icon_png_(std::move(icon_png)),
-      duration_seconds_(duration_seconds) {}
+      duration_seconds_(duration_seconds),
+      icon_png_(std::move(icon_png)) {}
 
 AchievementToast::~AchievementToast() {
   if (audio_stream_) {
@@ -47,6 +47,8 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
     start_time_ = std::chrono::steady_clock::now();
     started_ = true;
 
+    auto* drawer = imgui_drawer()->immediate_drawer();
+
     // Decode embedded achievement.png banner → RGBA and upload to GPU.
     if (!banner_decoded_) {
       banner_decoded_ = true;
@@ -54,28 +56,29 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
       unsigned char* rgba = stbi_load_from_memory(
           kAchievementImageData, static_cast<int>(kAchievementImageSize),
           &w, &h, &channels, 4);
-      if (rgba && w > 0 && h > 0) {
-        banner_texture_ = imgui_drawer()->CreateTexture(
+      if (rgba && w > 0 && h > 0 && drawer) {
+        banner_texture_ = drawer->CreateTexture(
             static_cast<uint32_t>(w), static_cast<uint32_t>(h),
             ImmediateTextureFilter::kLinear, false, rgba);
         stbi_image_free(rgba);
       }
     }
 
-    // Decode the per-achievement icon PNG (from XDBF) if one was supplied.
+    // Decode per-achievement icon PNG → RGBA and upload to GPU.
     if (!icon_decoded_ && !icon_png_.empty()) {
       icon_decoded_ = true;
-      int iw = 0, ih = 0, ich = 0;
-      unsigned char* icon_rgba = stbi_load_from_memory(
+      int w = 0, h = 0, channels = 0;
+      unsigned char* rgba = stbi_load_from_memory(
           icon_png_.data(), static_cast<int>(icon_png_.size()),
-          &iw, &ih, &ich, 4);
-      if (icon_rgba && iw > 0 && ih > 0) {
-        icon_texture_ = imgui_drawer()->CreateTexture(
-            static_cast<uint32_t>(iw), static_cast<uint32_t>(ih),
-            ImmediateTextureFilter::kLinear, false, icon_rgba);
-        stbi_image_free(icon_rgba);
+          &w, &h, &channels, 4);
+      if (rgba && w > 0 && h > 0 && drawer) {
+        icon_texture_ = drawer->CreateTexture(
+            static_cast<uint32_t>(w), static_cast<uint32_t>(h),
+            ImmediateTextureFilter::kLinear, false, rgba);
+        stbi_image_free(rgba);
       }
-      icon_png_.clear();  // free memory after upload
+      icon_png_.clear();
+      icon_png_.shrink_to_fit();
     }
 
     // Play the achievement unlock sound.
@@ -148,10 +151,24 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
           ImVec4(1, 1, 1, alpha));
     }
 
-    // Overlay gamerscore + title text in the lower portion of the banner.
-    // The achievement ring icon occupies ~25% of the left side; text area is to the right.
+    // Render per-achievement icon overlaid in the circular left area of the banner.
+    // The circle centre is at ~14% from left, vertically centred.
+    if (icon_texture_) {
+      constexpr float kIconSize = 44.0f;
+      float icon_x = kBannerWidth * 0.14f - kIconSize * 0.5f;
+      float icon_y = (kBannerHeight - kIconSize) * 0.5f;
+      ImGui::SetCursorPos(ImVec2(icon_x, icon_y));
+      ImGui::ImageWithBg(
+          reinterpret_cast<ImTextureID>(icon_texture_.get()),
+          ImVec2(kIconSize, kIconSize),
+          ImVec2(0, 0), ImVec2(1, 1),
+          ImVec4(0, 0, 0, 0),
+          ImVec4(1, 1, 1, alpha));
+    }
+
+    // Overlay gamerscore + title text. The icon area ends at ~28% from left.
     ImVec2 win_pos = ImGui::GetWindowPos();
-    float text_x = win_pos.x + kBannerWidth * 0.28f - 10.0f; 
+    float text_x = win_pos.x + kBannerWidth * 0.29f;
     float text_y = win_pos.y + kBannerHeight * 0.60f;
 
     ImFont* font = ImGui::GetFont();
@@ -161,21 +178,6 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
         ImVec2(text_x, text_y),
         ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)),
         (std::to_string(gamerscore_) + " G - " + title_).c_str());
-
-    // Draw per-achievement icon (rounded) on the left side, over the banner's ring slot.
-    if (icon_texture_) {
-      constexpr float kIconSize = 53.0f;
-      constexpr float kIconX = 8.0f;
-      float icon_y = (kBannerHeight - kIconSize) * 0.5f;
-      ImVec2 icon_min(win_pos.x + kIconX, win_pos.y + icon_y);
-      ImVec2 icon_max(icon_min.x + kIconSize, icon_min.y + kIconSize);
-      ImGui::GetWindowDrawList()->AddImageRounded(
-          reinterpret_cast<ImTextureID>(icon_texture_.get()),
-          icon_min, icon_max,
-          ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
-          ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)),
-          6.0f);
-    }
   }
   ImGui::End();
 
