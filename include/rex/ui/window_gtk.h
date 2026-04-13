@@ -45,6 +45,9 @@ class GTKWindow : public Window {
   void ApplyNewTitle() override;
   void ApplyNewMainMenu(MenuItem* old_main_menu) override;
   // Mouse capture seems to happen implicitly compared to Windows.
+  void ApplyNewMouseCapture() override;
+  void ApplyNewMouseRelease() override;
+  void ApplyNewCursorVisibility(CursorVisibility old_cursor_visibility) override;
   void FocusImpl() override;
 
   std::unique_ptr<Surface> CreateSurfaceImpl(Surface::TypeFlags allowed_types) override;

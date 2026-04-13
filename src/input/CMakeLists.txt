@@ -19,3 +19,10 @@ else()
 endif()
 
 target_link_libraries(rexinput PUBLIC rexcore SDL3::SDL3)
+
+if(NOT WIN32)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+    target_include_directories(rexinput PRIVATE ${GTK3_INCLUDE_DIRS})
+    target_link_libraries(rexinput PRIVATE ${GTK3_LIBRARIES})
+endif()
