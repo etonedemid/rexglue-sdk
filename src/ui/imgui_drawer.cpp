@@ -121,6 +121,10 @@ void ImGuiDrawer::Initialize() {
   io.Fonts->AddFontFromMemoryCompressedBase85TTF(kProggyTinyCompressedDataBase85, 10.0f,
                                                  &font_config, font_glyph_ranges);
 
+  // Add ProggyClean (ImGui's built-in readable font at 13px) for overlay UI
+  // such as the achievement toast. ProggyTiny remains the default ImGui font.
+  ui_font_ = io.Fonts->AddFontDefault();
+
 #if REX_PLATFORM_WIN32
   // TODO(benvanik): jp font on other platforms?
   // https://github.com/Koruri/kibitaki looks really good, but is 1.5MiB.

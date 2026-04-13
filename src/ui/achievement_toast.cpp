@@ -119,8 +119,8 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
 
   // Layout: render the achievement.png banner (820×208 → scaled to 270×69)
   // centered horizontally at the bottom, with gamerscore/title text overlay.
-  constexpr float kBannerWidth = 270.0f;
-  constexpr float kBannerHeight = 69.0f;
+  constexpr float kBannerWidth = 340.0f;
+  constexpr float kBannerHeight = 86.0f;
   float padding = 20.0f;
 
   ImVec2 display_size = io.DisplaySize;
@@ -151,30 +151,37 @@ void AchievementToast::OnDraw(ImGuiIO& io) {
           ImVec4(1, 1, 1, alpha));
     }
 
-    // Render per-achievement icon overlaid in the circular left area of the banner.
-    // The circle centre is at ~14% from left, vertically centred.
+    // Render per-achievement icon as a circle in the left area of the banner.
     if (icon_texture_) {
-      constexpr float kIconSize = 44.0f;
-      float icon_x = kBannerWidth * 0.14f - kIconSize * 0.5f;
+      constexpr float kIconSize = 34.0f;
+      constexpr float kRadius = kIconSize * 0.5f;
+      float icon_x = kBannerWidth * 0.10f - kRadius + 3.0f;
       float icon_y = (kBannerHeight - kIconSize) * 0.5f;
-      ImGui::SetCursorPos(ImVec2(icon_x, icon_y));
-      ImGui::ImageWithBg(
+
+      ImVec2 win_pos_icon = ImGui::GetWindowPos();
+      float abs_x = win_pos_icon.x + icon_x;
+      float abs_y = win_pos_icon.y + icon_y;
+
+      // AddImageRounded with rounding == radius produces a perfect circle clip.
+      ImGui::GetWindowDrawList()->AddImageRounded(
           reinterpret_cast<ImTextureID>(icon_texture_.get()),
-          ImVec2(kIconSize, kIconSize),
+          ImVec2(abs_x, abs_y),
+          ImVec2(abs_x + kIconSize, abs_y + kIconSize),
           ImVec2(0, 0), ImVec2(1, 1),
-          ImVec4(0, 0, 0, 0),
-          ImVec4(1, 1, 1, alpha));
+          ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)),
+          kRadius);
     }
 
-    // Overlay gamerscore + title text. The icon area ends at ~28% from left.
+    // Overlay gamerscore + title text. The icon area ends at ~23% from left.
     ImVec2 win_pos = ImGui::GetWindowPos();
-    float text_x = win_pos.x + kBannerWidth * 0.29f;
-    float text_y = win_pos.y + kBannerHeight * 0.60f;
+    float text_x = win_pos.x + kBannerWidth * 0.26f;
+    float text_y = win_pos.y + kBannerHeight * 0.55f;
 
-    ImFont* font = ImGui::GetFont();
-    float scaled_size = ImGui::GetFontSize() * 1.35f;
+    ImFont* font = imgui_drawer()->ui_font();
+    if (!font) font = ImGui::GetFont();
+    constexpr float kTextSize = 13.0f;
     ImGui::GetWindowDrawList()->AddText(
-        font, scaled_size,
+        font, kTextSize,
         ImVec2(text_x, text_y),
         ImGui::ColorConvertFloat4ToU32(ImVec4(1.0f, 1.0f, 1.0f, alpha)),
         (std::to_string(gamerscore_) + " G - " + title_).c_str());
