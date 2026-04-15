@@ -35,16 +35,6 @@ namespace rex {
 // Type Traits
 //=============================================================================
 
-// Big-Endian Type Detection
-template <typename T>
-struct is_be_type : std::false_type {};
-
-template <typename T>
-struct is_be_type<rex::be<T>> : std::true_type {};
-
-template <typename T>
-inline constexpr bool is_be_type_v = is_be_type<T>::value;
-
 //=============================================================================
 // PPCValue - Wrapper for scalar types with .value() method
 //=============================================================================
