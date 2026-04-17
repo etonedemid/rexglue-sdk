@@ -90,8 +90,9 @@ bool GamerProfileManager::profile_exists() const {
 }
 
 bool GamerProfileManager::load_or_create_default() {
+    std::lock_guard lock(mutex_);
     if (profile_exists()) {
-        return load();
+        return load_impl();
     }
 
     // Create default profile
@@ -104,11 +105,15 @@ bool GamerProfileManager::load_or_create_default() {
     profile_.created_time = now_unix();
 
     REXSYS_INFO("Created default gamer profile '{}'", profile_.gamertag);
-    return save();
+    return save_impl();
 }
 
 bool GamerProfileManager::load() {
     std::lock_guard lock(mutex_);
+    return load_impl();
+}
+
+bool GamerProfileManager::load_impl() {
     try {
         std::ifstream f(profile_path());
         if (!f.is_open()) return false;
@@ -116,7 +121,14 @@ bool GamerProfileManager::load() {
         json j = json::parse(f);
 
         profile_.gamertag = j.value("gamertag", "Player");
-        profile_.xuid = j.value("xuid", generate_xuid());
+
+        // XUID: support both hex string (new) and numeric (legacy)
+        if (j.contains("xuid") && j["xuid"].is_string()) {
+            profile_.xuid = std::stoull(j["xuid"].get<std::string>(), nullptr, 0);
+        } else {
+            profile_.xuid = j.value("xuid", generate_xuid());
+        }
+
         profile_.gamerpic_path = j.value("gamerpic_path", "");
         profile_.total_gamerscore = j.value("total_gamerscore", 0u);
         profile_.created_time = j.value("created_time", now_unix());
@@ -149,13 +161,17 @@ bool GamerProfileManager::load() {
 
 bool GamerProfileManager::save() const {
     std::lock_guard lock(mutex_);
+    return save_impl();
+}
+
+bool GamerProfileManager::save_impl() const {
     try {
         ensure_dirs();
 
-        // Save profile
+        // Save profile — XUID as hex string for cross-app compatibility
         json j;
         j["gamertag"] = profile_.gamertag;
-        j["xuid"] = profile_.xuid;
+        j["xuid"] = fmt::format("0x{:016X}", profile_.xuid);
         j["gamerpic_path"] = profile_.gamerpic_path;
         j["total_gamerscore"] = profile_.total_gamerscore;
         j["created_time"] = profile_.created_time;
@@ -188,24 +204,30 @@ bool GamerProfileManager::save() const {
 }
 
 void GamerProfileManager::set_gamertag(const std::string& tag) {
+    std::lock_guard lock(mutex_);
     profile_.gamertag = tag;
-    save();
+    save_impl();
 }
 
 void GamerProfileManager::set_gamerpic(const std::filesystem::path& source) {
     if (!std::filesystem::exists(source)) return;
 
+    std::lock_guard lock(mutex_);
     ensure_dirs();
     auto dest = gamerpics_dir() / source.filename();
     std::filesystem::copy_file(source, dest, std::filesystem::copy_options::overwrite_existing);
     profile_.gamerpic_path = dest.string();
-    save();
+    save_impl();
 }
 
 // ── Achievement tracking ──
 
 std::vector<Achievement> GamerProfileManager::load_achievements(uint32_t title_id) const {
     std::lock_guard lock(mutex_);
+    return load_achievements_impl(title_id);
+}
+
+std::vector<Achievement> GamerProfileManager::load_achievements_impl(uint32_t title_id) const {
     std::vector<Achievement> result;
 
     auto path = achievements_path(title_id);
@@ -237,16 +259,17 @@ std::vector<Achievement> GamerProfileManager::load_achievements(uint32_t title_i
 bool GamerProfileManager::unlock_achievement(uint32_t title_id, uint16_t achievement_id,
                                               const std::string& name, const std::string& desc,
                                               uint16_t gamerscore) {
-    auto achievements = load_achievements(title_id);
+    std::lock_guard lock(mutex_);
+    auto achievements = load_achievements_impl(title_id);
 
     // Check if already unlocked
     for (auto& a : achievements) {
         if (a.achievement_id == achievement_id) {
             if (a.is_unlocked()) return false;  // already unlocked
             a.unlocked_time = now_unix();
-            save_achievements(title_id, achievements);
+            save_achievements_impl(title_id, achievements);
             profile_.total_gamerscore += gamerscore;
-            save();
+            save_impl();
             REXSYS_INFO("Achievement unlocked: {} (+{}G)", name, gamerscore);
             return true;
         }
@@ -262,9 +285,9 @@ bool GamerProfileManager::unlock_achievement(uint32_t title_id, uint16_t achieve
     a.unlocked_time = now_unix();
     achievements.push_back(a);
 
-    save_achievements(title_id, achievements);
+    save_achievements_impl(title_id, achievements);
     profile_.total_gamerscore += gamerscore;
-    save();
+    save_impl();
     REXSYS_INFO("Achievement unlocked: {} (+{}G)", name, gamerscore);
     return true;
 }
@@ -272,6 +295,11 @@ bool GamerProfileManager::unlock_achievement(uint32_t title_id, uint16_t achieve
 void GamerProfileManager::save_achievements(uint32_t title_id,
                                              const std::vector<Achievement>& achievements) const {
     std::lock_guard lock(mutex_);
+    save_achievements_impl(title_id, achievements);
+}
+
+void GamerProfileManager::save_achievements_impl(uint32_t title_id,
+                                                  const std::vector<Achievement>& achievements) const {
     try {
         ensure_dirs();
         json j = json::array();
@@ -359,7 +387,7 @@ void GamerProfileManager::end_session() {
     REXSYS_INFO("Play session ended for {} — {} seconds this session, {} total",
                 session_title_name_, seconds, found->total_seconds);
 
-    save();
+    save_impl();
 }
 
 GamePlaytime GamerProfileManager::get_playtime(uint32_t title_id) const {

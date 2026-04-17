@@ -613,6 +613,7 @@ void KernelState::SetExecutableModule(object_ref<UserModule> module) {
     }
     rex::gamer::GamerProfileManager::instance().start_session(tid, title_name);
   }
+
 }
 
 void KernelState::LoadKernelModule(object_ref<KernelModule> kernel_module) {
