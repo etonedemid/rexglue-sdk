@@ -34,6 +34,7 @@ set(REXSYSTEM_SOURCES
     xam/app_manager.cpp
     xam/content_manager.cpp
     xam/user_profile.cpp
+    xam/achievement_manager.cpp
 
     # Formerly rexruntime: module loading, CPU execution, thread state
     ppc_types.cpp

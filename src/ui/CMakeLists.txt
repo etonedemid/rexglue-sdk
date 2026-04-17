@@ -21,6 +21,7 @@ set(REXUI_OVERLAY_SOURCES
     overlay/debug_overlay.cpp
     overlay/console_overlay.cpp
     overlay/settings_overlay.cpp
+    achievement_toast.cpp
 )
 
 # Vulkan UI backend
@@ -93,6 +94,7 @@ target_include_directories(rexui PUBLIC
 )
 target_include_directories(rexui PRIVATE
     ${REXGLUE_ROOT}/src  # For ui/shaders/bytecode includes
+    ${REXGLUE_ROOT}/thirdparty  # For stb/stb_image.h
 )
 
 target_link_libraries(rexui PUBLIC

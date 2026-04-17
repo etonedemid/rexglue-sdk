@@ -118,6 +118,12 @@ public:
 private:
     GamerProfileManager() = default;
 
+    // Internal implementations (caller must hold mutex_)
+    bool save_impl() const;
+    bool load_impl();
+    std::vector<Achievement> load_achievements_impl(uint32_t title_id) const;
+    void save_achievements_impl(uint32_t title_id, const std::vector<Achievement>& achievements) const;
+
     GamerProfile profile_;
     mutable std::mutex mutex_;
 

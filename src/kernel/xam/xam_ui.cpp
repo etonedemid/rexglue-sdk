@@ -10,13 +10,24 @@
  */
 
 #include <rex/logging.h>
+#include <rex/cvar.h>
 #include <rex/runtime.h>
 #include <rex/string.h>
 #include <rex/string/util.h>
 #include <rex/system/flags.h>
 #include <rex/system/kernel_state.h>
+#include <rex/kernel/xam/apps/xgi_app.h>
+#include <rex/kernel/xam/achievements_ui.h>
+#include <rex/system/xam/achievement_manager.h>
+#include <rex/system/gamer_profile.h>
 
 #include <imgui.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_STATIC
+#define STBI_ONLY_PNG
+#define STBI_NO_STDIO
+#include <stb/stb_image.h>
 
 REXCVAR_DEFINE_BOOL(headless, false, "Kernel",
                     "Don't display any UI, using defaults for prompts as needed");
@@ -29,6 +40,15 @@ REXCVAR_DEFINE_BOOL(headless, false, "Kernel",
 #include <rex/ui/imgui_drawer.h>
 #include <rex/ui/window.h>
 #include <rex/ui/windowed_app_context.h>
+
+// Compat type aliases (previously from ppc/types.h, now removed upstream)
+using ppc_u32_t = u32;
+using ppc_u64_t = u64;
+using ppc_u32_result_t = u32;
+using ppc_unknown_t = u32;
+using ppc_pvoid_t = mapped_void;
+using ppc_pu32_t = mapped_u32;
+using ppc_pchar16_t = mapped_wstring;
 
 namespace rex {
 namespace kernel {
@@ -542,6 +562,265 @@ void XamShowDirtyDiscErrorUI_entry(ppc_u32_t user_index) {
   exit(1);
 }
 
+// ---- Achievements UI -------------------------------------------------------
+
+class AchievementsDialog : public XamDialog {
+ public:
+  AchievementsDialog(rex::ui::ImGuiDrawer* imgui_drawer, rex::system::xam::AchievementManager* mgr,
+                     std::unordered_map<uint32_t, std::vector<uint8_t>> icon_data)
+      : XamDialog(imgui_drawer),
+        mgr_(mgr),
+        icon_png_data_(std::move(icon_data)) {}
+
+  void OnDraw(ImGuiIO& io) override {
+    if (!has_opened_) {
+      ImGui::OpenPopup("Achievements");
+      has_opened_ = true;
+      ImGui::SetNextWindowFocus();
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(560.f, 520.f), ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal("Achievements", nullptr,
+                               ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
+      // Gamepad B / Escape closes the dialog
+      if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight) ||
+          ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        ImGui::CloseCurrentPopup();
+        Close();
+        ImGui::EndPopup();
+        return;
+      }
+      if (ImGui::BeginTabBar("##tabs")) {
+        if (ImGui::BeginTabItem("Game Achievements")) {
+          auto* mgr = mgr_;
+          if (!mgr || mgr->achievements().empty()) {
+            ImGui::TextUnformatted("No achievements available for this title.");
+          } else {
+            const auto& achievements = mgr->achievements();
+
+            // --- Header: gamertag + gamerscore summary ---
+            auto& gp = rex::gamer::GamerProfileManager::instance().profile();
+            if (!gp.gamertag.empty()) {
+              ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.f, 1.f), "%s", gp.gamertag.c_str());
+              ImGui::SameLine();
+              ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.f), "|");
+              ImGui::SameLine();
+            }
+            uint32_t total_gs = mgr->GetTotalUnlockedGamerscore();
+            uint32_t max_gs = 0;
+            for (const auto& a : achievements)
+              max_gs += a.gamerscore;
+            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.f), "Gamerscore:");
+            ImGui::SameLine();
+            ImGui::Text("%u / %u G", total_gs, max_gs);
+            ImGui::Separator();
+
+            // --- Icon grid ---
+            constexpr float kDescPanelHeight = 72.f;
+            float grid_h = ImGui::GetContentRegionAvail().y - kDescPanelHeight -
+                           ImGui::GetStyle().ItemSpacing.y * 2.f -
+                           ImGui::GetStyle().FramePadding.y * 2.f;
+            if (grid_h < 60.f)
+              grid_h = 60.f;
+            ImGui::BeginChild("##achgrid", ImVec2(0.f, grid_h), ImGuiChildFlags_NavFlattened);
+
+            constexpr float kIconSize = 48.f;
+            constexpr float kIconSpacing = 6.f;
+            float avail_width = ImGui::GetContentRegionAvail().x;
+            int cols = static_cast<int>((avail_width + kIconSpacing) / (kIconSize + kIconSpacing));
+            if (cols < 1)
+              cols = 1;
+
+            for (int i = 0; i < static_cast<int>(achievements.size()); ++i) {
+              const auto& a = achievements[i];
+              EnsureIconTexture(a.id);
+              auto tex_it = icon_textures_.find(a.id);
+              bool has_icon = tex_it != icon_textures_.end() && tex_it->second;
+
+              int col = i % cols;
+              if (col > 0)
+                ImGui::SameLine(0.f, kIconSpacing);
+
+              ImGui::PushID(static_cast<int>(a.id));
+
+              bool is_selected = (selected_index_ == i);
+              if (is_selected) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.7f, 0.25f, 1.f));
+              } else {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.15f, 1.f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.25f, 0.25f, 1.f));
+              }
+
+              if (has_icon) {
+                ImVec4 tint = a.unlocked ? ImVec4(1, 1, 1, 1) : ImVec4(0.25f, 0.25f, 0.25f, 1.f);
+                if (ImGui::ImageButton("", reinterpret_cast<ImTextureID>(tex_it->second.get()),
+                                       ImVec2(kIconSize, kIconSize), ImVec2(0, 0), ImVec2(1, 1),
+                                       ImVec4(0, 0, 0, 0), tint)) {
+                  selected_index_ = i;
+                }
+              } else {
+                if (ImGui::Button(a.unlocked ? "?" : "X", ImVec2(kIconSize, kIconSize))) {
+                  selected_index_ = i;
+                }
+              }
+              // Give default focus to first icon so gamepad nav has a starting point
+              if (i == 0 && !nav_initialized_) {
+                ImGui::SetItemDefaultFocus();
+                nav_initialized_ = true;
+              }
+              if (ImGui::IsItemFocused()) {
+                selected_index_ = i;
+              }
+
+              ImGui::PopStyleColor(2);
+              ImGui::PopID();
+            }
+
+            ImGui::EndChild();
+
+            // --- Description panel ---
+            {
+              const rex::system::xam::AchievementState* selected = nullptr;
+              if (selected_index_ >= 0 && selected_index_ < static_cast<int>(achievements.size())) {
+                selected = &achievements[selected_index_];
+              }
+              ImGui::Separator();
+              if (selected) {
+                EnsureIconTexture(selected->id);
+                auto tex_it = icon_textures_.find(selected->id);
+                bool has_icon = tex_it != icon_textures_.end() && tex_it->second;
+                if (has_icon) {
+                  ImGui::ImageWithBg(
+                      reinterpret_cast<ImTextureID>(tex_it->second.get()), ImVec2(24.f, 24.f),
+                      ImVec2(0, 0), ImVec2(1, 1), ImVec4(0, 0, 0, 0),
+                      selected->unlocked ? ImVec4(1, 1, 1, 1) : ImVec4(0.3f, 0.3f, 0.3f, 1.f));
+                  ImGui::SameLine();
+                }
+                ImVec4 name_col = selected->unlocked ? ImVec4(0.2f, 0.9f, 0.3f, 1.f)
+                                                     : ImVec4(0.5f, 0.5f, 0.5f, 1.f);
+                ImGui::TextColored(name_col, "%u G %s", selected->gamerscore,
+                                   selected->label.c_str());
+                const std::string& desc =
+                    selected->unlocked ? selected->description : selected->unachieved_desc;
+                if (!desc.empty()) {
+                  ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.75f, 0.75f, 1.f));
+                  ImGui::TextWrapped("%s", desc.c_str());
+                  ImGui::PopStyleColor();
+                }
+              } else {
+                ImGui::TextDisabled("Select an achievement to see details.");
+              }
+            }
+          }
+          ImGui::EndTabItem();
+        }
+
+        ImGui::EndTabBar();
+      }
+
+      ImGui::Separator();
+      if (ImGui::Button("Close", ImVec2(120.f, 0.f))) {
+        ImGui::CloseCurrentPopup();
+        Close();
+      }
+      ImGui::EndPopup();
+    } else {
+      Close();
+    }
+  }
+
+ private:
+  bool has_opened_ = false;
+  bool nav_initialized_ = false;
+  int selected_index_ = 0;
+  rex::system::xam::AchievementManager* mgr_ = nullptr;
+
+  std::unordered_map<uint32_t, std::vector<uint8_t>> icon_png_data_;
+  std::unordered_map<uint32_t, std::unique_ptr<rex::ui::ImmediateTexture>> icon_textures_;
+
+  void EnsureIconTexture(uint32_t achievement_id) {
+    if (icon_textures_.count(achievement_id))
+      return;
+    auto it = icon_png_data_.find(achievement_id);
+    if (it == icon_png_data_.end() || it->second.empty())
+      return;
+    int w = 0, h = 0, channels = 0;
+    unsigned char* rgba = stbi_load_from_memory(
+        it->second.data(), static_cast<int>(it->second.size()), &w, &h, &channels, 4);
+    if (rgba && w > 0 && h > 0) {
+      auto* drawer = imgui_drawer()->immediate_drawer();
+      if (drawer) {
+        icon_textures_[achievement_id] =
+            drawer->CreateTexture(static_cast<uint32_t>(w), static_cast<uint32_t>(h),
+                                  rex::ui::ImmediateTextureFilter::kLinear, false, rgba);
+      }
+      stbi_image_free(rgba);
+    }
+    it->second.clear();
+  }
+};
+
+ppc_u32_result_t XamShowAchievementsUI_entry(ppc_u32_t user_index, ppc_pvoid_t overlapped) {
+  REXKRNL_DEBUG("XamShowAchievementsUI({})", uint32_t(user_index));
+  if (REXCVAR_GET(headless)) {
+    return xeXamDispatchHeadless([]() -> X_RESULT { return X_ERROR_SUCCESS; },
+                                 overlapped.guest_address());
+  }
+  const Runtime* emulator = REX_KERNEL_STATE()->emulator();
+  rex::ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
+  if (!imgui_drawer) {
+    return X_ERROR_FUNCTION_FAILED;
+  }
+  // Get managers via XgiApp (which owns AchievementManager).
+  auto* xgi_app = static_cast<rex::kernel::xam::apps::XgiApp*>(
+      REX_KERNEL_STATE()->app_manager()->FindById(0xFB));
+  auto* mgr = xgi_app ? xgi_app->achievement_manager() : nullptr;
+  // Pre-extract icon PNG data on PPC thread (safe to access XDBF here).
+  std::unordered_map<uint32_t, std::vector<uint8_t>> icon_data;
+  if (mgr) {
+    for (const auto& a : mgr->achievements()) {
+      auto png = mgr->GetAchievementIconPng(a.id);
+      if (!png.empty()) {
+        icon_data[a.id] = std::move(png);
+      }
+    }
+  }
+  return xeXamDispatchDialog<AchievementsDialog>(
+      new AchievementsDialog(imgui_drawer, mgr, std::move(icon_data)),
+      [](AchievementsDialog*) -> X_RESULT { return X_ERROR_SUCCESS; }, overlapped.guest_address());
+}
+
+ppc_u32_result_t XamShowAchievementsUIEx_entry(ppc_u32_t user_index, ppc_u32_t flags,
+                                               ppc_pvoid_t overlapped) {
+  return XamShowAchievementsUI_entry(user_index, overlapped);
+}
+
+void OpenAchievementsOverlay(rex::ui::ImGuiDrawer* drawer) {
+  if (!drawer) return;
+  auto* kernel_state = REX_KERNEL_STATE();
+  if (!kernel_state) return;
+  auto* xgi_app = static_cast<rex::kernel::xam::apps::XgiApp*>(
+      kernel_state->app_manager()->FindById(0xFB));
+  auto* mgr = xgi_app ? xgi_app->achievement_manager() : nullptr;
+  std::unordered_map<uint32_t, std::vector<uint8_t>> icon_data;
+  if (mgr) {
+    for (const auto& a : mgr->achievements()) {
+      auto png = mgr->GetAchievementIconPng(a.id);
+      if (!png.empty()) {
+        icon_data[a.id] = std::move(png);
+      }
+    }
+  }
+  // Dialog auto-registers with drawer and self-deletes on Close().
+  new AchievementsDialog(drawer, mgr, std::move(icon_data));
+}
+
+// ----------------------------------------------------------------------------
+
 ppc_u32_result_t XamShowPartyUI_entry(ppc_unknown_t r3, ppc_unknown_t r4) {
   return X_ERROR_FUNCTION_FAILED;
 }
@@ -583,8 +862,8 @@ XAM_EXPORT_STUB(__imp__XamNavigate);
 XAM_EXPORT_STUB(__imp__XamNavigateBack);
 XAM_EXPORT_STUB(__imp__XamOverrideHudOpenType);
 XAM_EXPORT_STUB(__imp__XamShowAchievementDetailsUI);
-XAM_EXPORT_STUB(__imp__XamShowAchievementsUI);
-XAM_EXPORT_STUB(__imp__XamShowAchievementsUIEx);
+XAM_EXPORT(__imp__XamShowAchievementsUI, rex::kernel::xam::XamShowAchievementsUI_entry)
+XAM_EXPORT(__imp__XamShowAchievementsUIEx, rex::kernel::xam::XamShowAchievementsUIEx_entry)
 XAM_EXPORT_STUB(__imp__XamShowAndWaitForMessageBoxEx);
 XAM_EXPORT_STUB(__imp__XamShowAvatarAwardGamesUI);
 XAM_EXPORT_STUB(__imp__XamShowAvatarAwardsUI);
