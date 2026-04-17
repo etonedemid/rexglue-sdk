@@ -12,6 +12,7 @@
 #include <rex/ui/overlay/settings_overlay.h>
 #include <rex/cvar.h>
 #include <rex/ui/keybinds.h>
+#include <rex/kernel/xam/achievements_ui.h>
 #include <imgui.h>
 REXCVAR_DECLARE(bool, mnk_mode);
 
@@ -498,10 +499,14 @@ void SettingsDialog::OnDraw(ImGuiIO& /*io*/) {
   }
   ImGui::EndChild();
 
-  // Bottom bar: Save button.
+  // Bottom bar: Save button + Achievements.
   ImGui::Separator();
   if (ImGui::Button("Save to config")) {
     rex::cvar::SaveConfig(config_path_);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Achievements")) {
+    rex::kernel::xam::OpenAchievementsOverlay(imgui_drawer());
   }
   ImGui::SameLine();
   ImGui::TextDisabled("(%s)", config_path_.filename().string().c_str());

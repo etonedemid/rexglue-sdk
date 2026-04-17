@@ -24,6 +24,7 @@
 #include <rex/ui/window_listener.h>
 
 struct ImDrawData;
+struct ImFont;
 struct ImGuiContext;
 struct ImGuiIO;
 enum ImGuiKey : int;
@@ -52,6 +53,12 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
     SetPresenter(new_presenter);
     SetImmediateDrawer(new_immediate_drawer);
   }
+
+  ImmediateDrawer* immediate_drawer() const { return immediate_drawer_; }
+
+  /// Returns a clean, readable font suitable for overlay UI (ProggyClean 13px).
+  /// Falls back to the ImGui default font if not yet initialized.
+  ImFont* ui_font() const { return ui_font_; }
 
   void Draw(UIDrawContext& ui_draw_context) override;
 
@@ -102,6 +109,9 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
   // Resources specific to an immediate drawer - must be destroyed before
   // detaching the presenter.
   std::unique_ptr<ImmediateTexture> font_texture_;
+
+  // Readable overlay font (ProggyClean 13px); loaded during Initialize().
+  ImFont* ui_font_ = nullptr;
 
   // If there's an active pointer, the ImGui mouse is controlled by this touch.
   // If it's TouchEvent::kPointerIDNone, the ImGui mouse is controlled by the
