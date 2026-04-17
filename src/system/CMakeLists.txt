@@ -27,6 +27,9 @@ set(REXSYSTEM_SOURCES
     util/xdbf_utils.cpp
     util/gameinfo_utils.cpp
 
+    # Gamer profile (shared storage)
+    gamer_profile.cpp
+
     # XAM services
     xam/app_manager.cpp
     xam/content_manager.cpp
@@ -56,6 +59,7 @@ target_include_directories(rexsystem PUBLIC
 )
 target_include_directories(rexsystem PRIVATE
     ${REXGLUE_ROOT}/thirdparty
+    ${REXGLUE_ROOT}/thirdparty/inja/third_party/include
 )
 
 target_link_libraries(rexsystem

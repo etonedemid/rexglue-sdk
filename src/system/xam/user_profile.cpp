@@ -14,6 +14,7 @@
 #include <fmt/format.h>
 
 #include <rex/logging.h>
+#include <rex/system/gamer_profile.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/xam/user_profile.h>
 
@@ -22,11 +23,12 @@ namespace system {
 namespace xam {
 
 UserProfile::UserProfile() {
-  // 58410A1F checks the user XUID against a mask of 0x00C0000000000000 (3<<54),
-  // if non-zero, it prevents the user from playing the game.
-  // "You do not have permissions to perform this operation."
-  xuid_ = 0xB13EBABEBABEBABE;
-  name_ = "User";
+  // Load from shared gamer profile if available
+  auto& gpm = rex::gamer::GamerProfileManager::instance();
+  gpm.load_or_create_default();
+
+  xuid_ = gpm.profile().xuid;
+  name_ = gpm.profile().gamertag;
 
   // https://cs.rin.ru/forum/viewtopic.php?f=38&t=60668&hilit=gfwl+live&start=195
   // https://github.com/arkem/py360/blob/master/py360/constants.py

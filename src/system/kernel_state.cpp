@@ -23,6 +23,7 @@
 #include <rex/string.h>
 #include <rex/string/util.h>
 #include <rex/kernel/xboxkrnl/threading.h>
+#include <rex/system/gamer_profile.h>
 #include <rex/system/kernel_module.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/function_dispatcher.h>
@@ -151,6 +152,9 @@ void KernelState::SetProcessTLSVars(X_KPROCESS* process, uint32_t num_slots, uin
 }
 
 KernelState::~KernelState() {
+  // End play session tracking
+  rex::gamer::GamerProfileManager::instance().end_session();
+
   // Destroy app_manager while terminated thread stacks are still valid
   app_manager_.reset();
 
@@ -596,6 +600,18 @@ void KernelState::SetExecutableModule(object_ref<UserModule> module) {
     }));
     dispatch_thread_->set_name("Kernel Dispatch");
     dispatch_thread_->Create();
+  }
+
+  // Start tracking playtime for this title
+  auto tid = title_id();
+  if (tid != 0) {
+    auto xdbf = title_xdbf();
+    std::string title_name = "Unknown Title";
+    if (xdbf.is_valid()) {
+      auto name = xdbf.title();
+      if (!name.empty()) title_name = name;
+    }
+    rex::gamer::GamerProfileManager::instance().start_session(tid, title_name);
   }
 }
 
