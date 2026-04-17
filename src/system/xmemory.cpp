@@ -545,6 +545,34 @@ bool Memory::AccessViolationCallback(std::unique_lock<std::recursive_mutex> glob
       }
     }
 
+    // Demand-paging: if the page is not committed at all, commit it now.
+    // This handles cases where guest code (e.g. video decoder) writes to
+    // physical memory that was never explicitly allocated via XPhysicalAlloc
+    // because the subsystem that would allocate it is not implemented.
+    {
+      auto* physical_heap = static_cast<PhysicalHeap*>(heap);
+      uint32_t page_size = physical_heap->page_size();
+      uint32_t page_base_addr = virtual_address & ~(page_size - 1);
+      HeapAllocationInfo info{};
+      bool need_commit = false;
+      if (!heap->QueryRegionInfo(page_base_addr, &info) ||
+          !(info.state & memory::kMemoryAllocationCommit)) {
+        need_commit = true;
+      }
+      if (need_commit) {
+        if (physical_heap->AllocFixed(
+                page_base_addr, page_size, page_size,
+                memory::kMemoryAllocationReserve | memory::kMemoryAllocationCommit,
+                memory::kMemoryProtectRead | memory::kMemoryProtectWrite)) {
+          REXSYS_WARN(
+              "Demand-paged physical memory for guest {:08X} (host {:016X})",
+              virtual_address,
+              static_cast<uint64_t>(reinterpret_cast<uintptr_t>(host_address)));
+          return true;
+        }
+      }
+    }
+
     uint32_t current_guest_protect = 0;
     heap->QueryProtect(virtual_address, &current_guest_protect);
     uint32_t physical_address = GetPhysicalAddress(virtual_address);

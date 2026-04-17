@@ -20,6 +20,7 @@
 #include <rex/ui/overlay/console_overlay.h>
 #include <rex/ui/overlay/debug_overlay.h>
 #include <rex/ui/overlay/settings_overlay.h>
+#include <rex/ui/achievement_toast.h>
 #include <rex/graphics/graphics_system.h>
 #if REX_HAS_VULKAN
 #include <rex/graphics/vulkan/graphics_system.h>
@@ -222,7 +223,6 @@ bool ReXApp::OnInitialize() {
         console_overlay_ = std::make_unique<ui::ConsoleDialog>(imgui_drawer_.get(), log_sink_);
         settings_overlay_ = std::make_unique<ui::SettingsDialog>(
             imgui_drawer_.get(), exe_dir / (std::string(GetName()) + ".toml"));
-
         // Allow subclass to add custom dialogs
         OnCreateDialogs(imgui_drawer_.get());
 
