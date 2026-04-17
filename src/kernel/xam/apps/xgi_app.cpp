@@ -12,9 +12,7 @@
 #include <rex/kernel/xam/apps/xgi_app.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
-#include <rex/system/xam/achievement_manager.h>
 #include <rex/thread.h>
-#include <rex/ui/achievement_toast.h>
 #include <rex/ui/windowed_app_context.h>
 
 namespace rex {
@@ -26,12 +24,7 @@ namespace apps {
 using namespace rex::system;
 
 XgiApp::XgiApp(KernelState* kernel_state)
-    : App(kernel_state, 0xFB),
-      achievement_manager_(std::make_unique<system::xam::AchievementManager>(kernel_state)),
-      ra_client_(std::make_unique<system::xam::RAClient>(
-          kernel_state->emulator(), achievement_manager_.get(),
-          kernel_state->emulator() ? kernel_state->emulator()->user_data_root()
-                                   : std::filesystem::path{})) {}
+    : App(kernel_state, 0xFB) {}
 
 // http://mb.mirage.org/bugzilla/xliveless/main.c
 
@@ -64,58 +57,6 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
       return X_E_SUCCESS;
     }
     case 0x000B0008: {
-      assert_true(!buffer_length || buffer_length == 8);
-      uint32_t achievement_count = memory::load_and_swap<uint32_t>(buffer + 0);
-      uint32_t achievements_ptr = memory::load_and_swap<uint32_t>(buffer + 4);
-      REXKRNL_DEBUG("XGIUserWriteAchievements({:08X}, {:08X})", achievement_count,
-                    achievements_ptr);
-
-      // XUSER_ACHIEVEMENT: { uint32_t dwUserIndex; uint32_t dwAchievementId; }
-      if (achievement_count && achievements_ptr) {
-        auto* achievements_data = memory_->TranslateVirtual(achievements_ptr);
-        std::vector<uint32_t> ids;
-        ids.reserve(achievement_count);
-        for (uint32_t i = 0; i < achievement_count; ++i) {
-          // uint32_t user_index = memory::load_and_swap<uint32_t>(
-          //     achievements_data + i * 8 + 0);
-          uint32_t achievement_id = memory::load_and_swap<uint32_t>(achievements_data + i * 8 + 4);
-          ids.push_back(achievement_id);
-        }
-
-        auto* achievement_manager = achievement_manager_.get();
-        if (achievement_manager) {
-          auto newly_unlocked = achievement_manager->UnlockAchievements(ids);
-          for (uint32_t id : newly_unlocked) {
-            // Broadcast XN_SYS_ACHIEVEMENT_UNLOCKED (notification area 5, id 0xB)
-            // data = achievement id
-            kernel_state_->BroadcastNotification(0x0000000B, id);
-          }
-
-          // Show toast notifications for unlocked achievements
-          const Runtime* emulator = kernel_state_->emulator();
-          ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
-          ui::WindowedAppContext* app_context = emulator->app_context();
-          if (imgui_drawer && app_context) {
-            const auto& achievements = achievement_manager->achievements();
-            for (uint32_t id : newly_unlocked) {
-              for (const auto& a : achievements) {
-                if (a.id == id) {
-                  std::string label = a.label;
-                  uint16_t gs = a.gamerscore;
-                  std::vector<uint8_t> icon = achievement_manager->GetAchievementIconPng(id);
-                  app_context->CallInUIThread([imgui_drawer, label = std::move(label), gs,
-                                               icon = std::move(icon)]() mutable {
-                    new rex::ui::AchievementToast(imgui_drawer, std::move(label), gs,
-                                                  std::move(icon));
-                  });
-                  break;
-                }
-              }
-            }
-          }
-        }
-      }
-
       return X_E_SUCCESS;
     }
     case 0x000B0010: {

@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstdint>
 
+#include <rex/compat/cpp23_shim.h>
 #include <rex/chrono/clock.h>
 
 namespace rex {

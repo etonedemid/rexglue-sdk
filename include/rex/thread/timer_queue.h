@@ -16,6 +16,8 @@
 #include <functional>
 #include <memory>
 
+#include <rex/compat/cpp23_shim.h>
+
 // This is a platform independent implementation of a timer queue similar to
 // Windows CreateTimerQueueTimer with WT_EXECUTEINTIMERTHREAD.
 

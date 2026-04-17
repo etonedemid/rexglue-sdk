@@ -13,9 +13,7 @@
 #include <memory>
 
 #include <rex/system/kernel_state.h>
-#include <rex/system/xam/achievement_manager.h>
 #include <rex/system/xam/app_manager.h>
-#include <rex/system/xam/ra_client.h>
 
 namespace rex {
 namespace kernel {
@@ -29,14 +27,7 @@ class XgiApp : public system::xam::App {
   X_HRESULT DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
                                 uint32_t buffer_length) override;
 
-  system::xam::AchievementManager* achievement_manager() const {
-    return achievement_manager_.get();
-  }
-  system::xam::RAClient* ra_client() const { return ra_client_.get(); }
-
  private:
-  std::unique_ptr<system::xam::AchievementManager> achievement_manager_;
-  std::unique_ptr<system::xam::RAClient> ra_client_;
 };
 
 }  // namespace apps

@@ -84,7 +84,13 @@ class RAClient {
   // Static callbacks and HttpRequest are defined in ra_client.cpp
   // and access private members through friendship.
   friend struct RAClientCallbacks;
-  struct HttpRequest;
+  struct HttpRequest {
+    std::string url;
+    std::string post_data;
+    std::string content_type;
+    void* callback;
+    void* callback_data;
+  };
 
   // ---------------------------------------------------------------------------
   // HTTP worker

@@ -23,7 +23,6 @@
 #include <rex/ppc/types.h>
 #include <rex/string/util.h>
 #include <rex/system/kernel_state.h>
-#include <rex/system/xam/achievement_manager.h>
 #include <rex/system/xam/user_profile.h>
 #include <rex/system/xenumerator.h>
 #include <rex/system/xio.h>
@@ -504,185 +503,12 @@ ppc_u32_result_t XamShowSigninUI_entry(ppc_u32_t unk, ppc_u32_t unk_mask) {
   return X_ERROR_SUCCESS;
 }
 
-// TODO(gibbed): probably a FILETIME/LARGE_INTEGER, unknown currently
-struct X_ACHIEVEMENT_UNLOCK_TIME {
-  rex::be<uint32_t> unk_0;
-  rex::be<uint32_t> unk_4;
-};
-
-struct X_ACHIEVEMENT_DETAILS {
-  rex::be<uint32_t> id;
-  rex::be<uint32_t> label_ptr;
-  rex::be<uint32_t> description_ptr;
-  rex::be<uint32_t> unachieved_ptr;
-  rex::be<uint32_t> image_id;
-  rex::be<uint32_t> gamerscore;
-  X_ACHIEVEMENT_UNLOCK_TIME unlock_time;
-  rex::be<uint32_t> flags;
-
-  static const size_t kStringBufferSize = 464;
-};
-static_assert_size(X_ACHIEVEMENT_DETAILS, 36);
-
-class XStaticAchievementEnumerator : public XEnumerator {
- public:
-  struct AchievementDetails {
-    uint32_t id;
-    std::u16string label;
-    std::u16string description;
-    std::u16string unachieved;
-    uint32_t image_id;
-    uint32_t gamerscore;
-    struct {
-      uint32_t unk_0;
-      uint32_t unk_4;
-    } unlock_time;
-    uint32_t flags;
-  };
-
-  XStaticAchievementEnumerator(KernelState* kernel_state, size_t items_per_enumerate,
-                               uint32_t flags)
-      : XEnumerator(kernel_state, items_per_enumerate,
-                    sizeof(X_ACHIEVEMENT_DETAILS) +
-                        (!!(flags & 7) ? X_ACHIEVEMENT_DETAILS::kStringBufferSize : 0)),
-        flags_(flags) {}
-
-  void AppendItem(AchievementDetails item) { items_.push_back(std::move(item)); }
-
-  uint32_t WriteItems(uint32_t buffer_ptr, uint8_t* buffer_data, uint32_t* written_count) override {
-    size_t count = std::min(items_.size() - current_item_, items_per_enumerate());
-    if (!count) {
-      return X_ERROR_NO_MORE_FILES;
-    }
-
-    size_t size = count * item_size();
-
-    auto details = reinterpret_cast<X_ACHIEVEMENT_DETAILS*>(buffer_data);
-    size_t string_offset = items_per_enumerate() * sizeof(X_ACHIEVEMENT_DETAILS);
-    auto string_buffer =
-        StringBuffer{buffer_ptr + static_cast<uint32_t>(string_offset), &buffer_data[string_offset],
-                     count * X_ACHIEVEMENT_DETAILS::kStringBufferSize};
-    for (size_t i = 0, o = current_item_; i < count; ++i, ++current_item_) {
-      const auto& item = items_[current_item_];
-      details[i].id = item.id;
-      details[i].label_ptr = !!(flags_ & 1) ? AppendString(string_buffer, item.label) : 0;
-      details[i].description_ptr =
-          !!(flags_ & 2) ? AppendString(string_buffer, item.description) : 0;
-      details[i].unachieved_ptr = !!(flags_ & 4) ? AppendString(string_buffer, item.unachieved) : 0;
-      details[i].image_id = item.image_id;
-      details[i].gamerscore = item.gamerscore;
-      details[i].unlock_time.unk_0 = item.unlock_time.unk_0;
-      details[i].unlock_time.unk_4 = item.unlock_time.unk_4;
-      details[i].flags = item.flags;
-    }
-
-    if (written_count) {
-      *written_count = static_cast<uint32_t>(count);
-    }
-
-    return X_ERROR_SUCCESS;
-  }
-
- private:
-  struct StringBuffer {
-    uint32_t ptr;
-    uint8_t* data;
-    size_t remaining_bytes;
-  };
-
-  uint32_t AppendString(StringBuffer& sb, const std::u16string_view string) {
-    size_t count = string.length() + 1;
-    size_t size = count * sizeof(char16_t);
-    if (size > sb.remaining_bytes) {
-      assert_always();
-      return 0;
-    }
-    auto ptr = sb.ptr;
-    rex::string::util_copy_and_swap_truncating(reinterpret_cast<char16_t*>(sb.data), string, count);
-    sb.ptr += static_cast<uint32_t>(size);
-    sb.data += size;
-    sb.remaining_bytes -= size;
-    return ptr;
-  }
-
- private:
-  uint32_t flags_;
-  std::vector<AchievementDetails> items_;
-  size_t current_item_ = 0;
-};
-
 ppc_u32_result_t XamUserCreateAchievementEnumerator_entry(ppc_u32_t title_id, ppc_u32_t user_index,
                                                           ppc_u32_t xuid, ppc_u32_t flags,
                                                           ppc_u32_t offset, ppc_u32_t count,
                                                           ppc_pu32_t buffer_size_ptr,
                                                           ppc_pu32_t handle_ptr) {
-  if (!count || !buffer_size_ptr || !handle_ptr) {
-    return X_ERROR_INVALID_PARAMETER;
-  }
-
-  if (user_index >= 4) {
-    return X_ERROR_INVALID_PARAMETER;
-  }
-
-  size_t entry_size = sizeof(X_ACHIEVEMENT_DETAILS);
-  if (flags & 7) {
-    entry_size += X_ACHIEVEMENT_DETAILS::kStringBufferSize;
-  }
-
-  if (buffer_size_ptr) {
-    *buffer_size_ptr = static_cast<uint32_t>(entry_size) * count;
-  }
-
-  auto e = object_ref<XStaticAchievementEnumerator>(
-      new XStaticAchievementEnumerator(REX_KERNEL_STATE(), count, flags));
-  auto result = e->Initialize(user_index, 0xFB, 0xB000A, 0xB000B, 0);
-  if (XFAILED(result)) {
-    return result;
-  }
-
-  const util::XdbfGameData db = REX_KERNEL_STATE()->title_xdbf();
-
-  if (db.is_valid()) {
-    const XLanguage language =
-        db.GetExistingLanguage(static_cast<XLanguage>(REXCVAR_GET(user_language)));
-    const std::vector<util::XdbfAchievementTableEntry> achievement_list = db.GetAchievements();
-    auto* achievement_manager = [&]() -> rex::system::xam::AchievementManager* {
-      auto* app = REX_KERNEL_STATE()->app_manager()->FindById(0xFB);
-      auto* xgi = static_cast<rex::kernel::xam::apps::XgiApp*>(app);
-      return xgi ? xgi->achievement_manager() : nullptr;
-    }();
-
-    for (const util::XdbfAchievementTableEntry& entry : achievement_list) {
-      uint32_t achievement_flags = entry.flags;
-      uint32_t unlock_time_lo = 0;
-      uint32_t unlock_time_hi = 0;
-
-      // Check if the achievement has been unlocked
-      if (achievement_manager && achievement_manager->IsUnlocked(entry.id)) {
-        // XACHIEVEMENT_DETAILS_ACHIEVED_ONLINE = 0x10000
-        // XACHIEVEMENT_DETAILS_ACHIEVED = 0x20000
-        achievement_flags |= 0x30000;
-        uint64_t ft = achievement_manager->GetUnlockTime(entry.id);
-        unlock_time_lo = static_cast<uint32_t>(ft & 0xFFFFFFFF);
-        unlock_time_hi = static_cast<uint32_t>(ft >> 32);
-      }
-
-      auto item = XStaticAchievementEnumerator::AchievementDetails{
-          entry.id,
-          rex::string::to_utf16(db.GetStringTableEntry(language, entry.label_id)),
-          rex::string::to_utf16(db.GetStringTableEntry(language, entry.description_id)),
-          rex::string::to_utf16(db.GetStringTableEntry(language, entry.unachieved_id)),
-          entry.image_id,
-          entry.gamerscore,
-          {unlock_time_lo, unlock_time_hi},
-          achievement_flags};
-
-      e->AppendItem(item);
-    }
-  }
-
-  *handle_ptr = e->handle();
-  return X_ERROR_SUCCESS;
+  return X_ERROR_FUNCTION_FAILED;
 }
 
 ppc_u32_result_t XamParseGamerTileKey_entry(ppc_pu32_t key_ptr, ppc_pu32_t out1_ptr,

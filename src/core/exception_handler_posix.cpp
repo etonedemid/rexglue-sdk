@@ -211,7 +211,11 @@ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
   // an infinite loop. Reset to default handler and re-raise to get a proper crash.
   REXLOG_ERROR("Unhandled {} at PC={:#x}, fault_address={:#x} - crashing",
                signal_number == SIGSEGV ? "SIGSEGV" : "SIGILL",
+#if REX_ARCH_AMD64
                thread_context.rip,
+#elif REX_ARCH_ARM64
+               thread_context.pc,
+#endif
                signal_number == SIGSEGV ? reinterpret_cast<uint64_t>(signal_info->si_addr) : 0);
   signal(signal_number, SIG_DFL);
   raise(signal_number);

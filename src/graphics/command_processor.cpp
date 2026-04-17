@@ -32,10 +32,8 @@
 #include <rex/memory.h>
 #include <rex/memory/ring_buffer.h>
 #include <rex/stream.h>
-#include <rex/kernel/xam/apps/xgi_app.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
-#include <rex/system/xam/ra_client.h>
 
 REXCVAR_DEFINE_BOOL(vsync, true, "GPU", "Enable vertical sync");
 
@@ -1177,14 +1175,6 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(memory::RingBuffer* reader, ui
   reader->AdvanceRead((count - 4) * sizeof(uint32_t));
 
   IssueSwap(frontbuffer_ptr, frontbuffer_width, frontbuffer_height);
-
-  // Tick RetroAchievements frame processing (memory checks, leaderboard updates, etc.)
-  if (auto* xgi = static_cast<rex::kernel::xam::apps::XgiApp*>(
-          kernel_state_->app_manager()->FindById(0xFB))) {
-    if (auto* ra = xgi->ra_client()) {
-      ra->DoFrame();
-    }
-  }
 
   ++counter_;
   return true;

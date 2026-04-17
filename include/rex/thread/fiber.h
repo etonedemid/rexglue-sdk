@@ -14,7 +14,11 @@
 #include <rex/platform.h>
 #include <cstddef>
 
-#if REX_PLATFORM_LINUX || REX_PLATFORM_MAC
+#if REX_PLATFORM_ANDROID
+// Android bionic lacks ucontext.h; using raw AArch64 context switch.
+#include <cstdint>
+#include <vector>
+#elif REX_PLATFORM_LINUX || REX_PLATFORM_MAC
 #include <ucontext.h>
 #include <cstdint>
 #include <vector>
@@ -51,6 +55,15 @@ struct Fiber {
 #if REX_PLATFORM_WIN32
   void* handle_ = nullptr;
   bool is_thread_fiber_ = false;
+#elif REX_PLATFORM_ANDROID
+  // 168 bytes: 11 GPRs + LR + SP + 8 SIMD regs, each 8 bytes.
+  alignas(16) uint8_t context_[168]{};
+  std::vector<uint8_t> stack_;
+  void (*entry_)(void*) = nullptr;
+  void* arg_ = nullptr;
+  bool is_thread_fiber_ = false;
+
+  static void Trampoline();
 #elif REX_PLATFORM_LINUX
   ucontext_t context_{};
   std::vector<uint8_t> stack_;

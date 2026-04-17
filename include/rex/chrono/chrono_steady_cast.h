@@ -13,6 +13,7 @@
 
 #include <atomic>
 
+#include <rex/compat/cpp23_shim.h>
 #include <rex/chrono/chrono.h>
 
 // This is in a separate header because casting to and from steady time points

@@ -2,7 +2,6 @@
 
 # Core UI sources
 set(REXUI_CORE_SOURCES
-    achievement_toast.cpp
     graphics_upload_buffer_pool.cpp
     graphics_util.cpp
     imgui_dialog.cpp
@@ -61,6 +60,11 @@ if(WIN32)
         window_win.cpp
         windowed_app_context_win.cpp
     )
+elseif(ANDROID)
+    set(REXUI_PLATFORM_SOURCES
+        window_android.cpp
+        windowed_app_context_android.cpp
+    )
 else()
     set(REXUI_PLATFORM_SOURCES
         surface_gnulinux.cpp
@@ -98,6 +102,7 @@ target_include_directories(rexui PRIVATE
 target_link_libraries(rexui PUBLIC
     rexcore
     imgui::imgui
+    SDL3::SDL3
 )
 
 if(REXGLUE_FIDELITYFX_SOURCE_DIR AND EXISTS "${REXGLUE_FIDELITYFX_SOURCE_DIR}/sdk/include")
@@ -135,6 +140,12 @@ if(WIN32)
     target_link_libraries(rexui PUBLIC
         dwmapi
         shcore
+        dxgi
+    )
+elseif(ANDROID)
+    target_link_libraries(rexui PUBLIC
+        android
+        log
     )
 else()
     find_package(PkgConfig REQUIRED)

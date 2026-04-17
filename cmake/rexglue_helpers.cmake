@@ -15,6 +15,9 @@ function(rexglue_configure_target target_name)
     if(WIN32)
         target_sources(${target_name} PRIVATE
             ${REXGLUE_SHARE_DIR}/windowed_app_main_win.cpp)
+    elseif(ANDROID)
+        target_sources(${target_name} PRIVATE
+            ${REXGLUE_SHARE_DIR}/windowed_app_main_android.cpp)
     else()
         target_sources(${target_name} PRIVATE
             ${REXGLUE_SHARE_DIR}/windowed_app_main_posix.cpp)
@@ -42,7 +45,7 @@ function(rexglue_configure_target target_name)
     endif()
 
     # Linux platform settings
-    if(UNIX AND NOT APPLE)
+    if(UNIX AND NOT APPLE AND NOT ANDROID)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
         target_include_directories(${target_name} PRIVATE ${GTK3_INCLUDE_DIRS})
@@ -54,6 +57,15 @@ function(rexglue_configure_target target_name)
         elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64")
             target_compile_options(${target_name} PRIVATE -march=armv8-a)
         endif()
+    endif()
+
+    # Android platform settings
+    if(ANDROID)
+        target_link_libraries(${target_name} PRIVATE android log)
+        # Build as shared library — loaded by Java Activity
+        set_target_properties(${target_name} PROPERTIES
+            SUFFIX ".so"
+        )
     endif()
 
     if(NOT MSVC)

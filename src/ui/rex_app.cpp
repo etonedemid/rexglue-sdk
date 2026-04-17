@@ -37,6 +37,10 @@
 #include <rex/ui/keybinds.h>
 #include <rex/version.h>
 
+#if REX_PLATFORM_ANDROID
+#include <rex/ui/windowed_app_context_android.h>
+#endif
+
 #include <imgui.h>
 
 #include <filesystem>
@@ -243,6 +247,16 @@ bool ReXApp::OnInitialize() {
       }
     }
     window_->SetPresenter(presenter);
+
+#if REX_PLATFORM_ANDROID
+    // On Android there is no OS paint event. Expose the presenter via the
+    // AndroidWindowedAppContext so nativePumpEvents can call
+    // PaintFromUIThread() every Vsync from the Choreographer callback.
+    if (auto* android_ctx =
+            dynamic_cast<rex::ui::AndroidWindowedAppContext*>(&app_context())) {
+      android_ctx->SetPresenter(presenter);
+    }
+#endif
   }
 
   // Initialize shader storage cache for persistent pipeline caching.

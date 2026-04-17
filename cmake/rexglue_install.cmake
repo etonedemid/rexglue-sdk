@@ -20,7 +20,6 @@ set(REXGLUE_INSTALL_TARGETS
     disruptorplus renderdoc simde tomlplusplus  # INTERFACE (header-only)
     aes128 mspack o1heap disasm xxhash imgui  # STATIC libraries
     libavcodec libavutil           # FFmpeg (vendored build)
-    rcheevos                       # RetroAchievements client library (FetchContent)
     # CLI tool
     rexglue
 )
@@ -110,14 +109,6 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-# Install rcheevos public headers (fetched via FetchContent — path is in RCHEEVOS_INCLUDE_DIR)
-if(DEFINED RCHEEVOS_INCLUDE_DIR AND EXISTS "${RCHEEVOS_INCLUDE_DIR}")
-    install(DIRECTORY "${RCHEEVOS_INCLUDE_DIR}/"
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-        FILES_MATCHING PATTERN "*.h"
-    )
-endif()
-
 # Install SPIRV-Tools headers (only the public API, not opt/linker)
 if(REXGLUE_USE_VULKAN)
     install(FILES
@@ -131,6 +122,7 @@ endif()
 install(FILES
     src/ui/windowed_app_main_win.cpp
     src/ui/windowed_app_main_posix.cpp
+    src/ui/windowed_app_main_android.cpp
     src/ui/rex_app.cpp
     DESTINATION ${CMAKE_INSTALL_DATADIR}/rexglue
 )

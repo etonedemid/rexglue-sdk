@@ -45,15 +45,8 @@ namespace rex::system::xam {
 #define REXRA_ERROR(fmt, ...) REXSYS_ERROR("[RA] " fmt, ##__VA_ARGS__)
 #define REXRA_DEBUG(fmt, ...) REXSYS_DEBUG("[RA] " fmt, ##__VA_ARGS__)
 
-// HttpRequest struct — defined here rather than in the header to avoid
-// exposing rcheevos types through the public header.
-struct RAClient::HttpRequest {
-  std::string url;
-  std::string post_data;     // empty string → GET request
-  std::string content_type;  // default "application/x-www-form-urlencoded"
-  rc_client_server_callback_t callback;
-  void* callback_data;
-};
+// HttpRequest struct is now defined in the header with type-erased callback.
+// The rc_client_server_callback_t is cast via reinterpret_cast when needed.
 
 // Friend struct providing static callbacks with the exact signatures
 // expected by rcheevos.  These access RAClient private members.
@@ -88,7 +81,7 @@ struct RAClientCallbacks {
     req.content_type = (request->content_type && request->content_type[0])
                            ? request->content_type
                            : "application/x-www-form-urlencoded";
-    req.callback = callback;
+    req.callback = reinterpret_cast<void*>(callback);
     req.callback_data = callback_data;
 
     self->EnqueueRequest(std::move(req));
@@ -483,7 +476,7 @@ void RAClient::RunHttpThread() {
     resp.http_status_code = ok ? static_cast<uint32_t>(http_status) : 0;
     resp.body = ok ? response_body.c_str() : nullptr;
     resp.body_length = ok ? static_cast<uint32_t>(response_body.size()) : 0;
-    req.callback(&resp, req.callback_data);
+    reinterpret_cast<rc_client_server_callback_t>(req.callback)(&resp, req.callback_data);
   }
 
   curl_easy_cleanup(curl);

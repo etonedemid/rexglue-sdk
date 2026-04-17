@@ -21,6 +21,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <rex/compat/cpp23_shim.h>
 #include <rex/filesystem/vfs.h>
 #include <rex/logging.h>
 #include <rex/system/thread_state.h>

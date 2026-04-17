@@ -52,6 +52,8 @@ elseif(UNIX)
         exception_handler_posix.cpp
         filesystem_posix.cpp
         fiber_posix.cpp
+        fiber_android.cpp
+        filesystem_android.cpp
         mapped_memory_posix.cpp
         math_gcc.cpp
         memory_posix.cpp
@@ -60,6 +62,9 @@ elseif(UNIX)
         string_posix.cpp
         threading_posix.cpp
     )
+    if(ANDROID)
+        target_sources(rexcore PRIVATE sdl3_android_stubs.c)
+    endif()
 endif()
 
 target_include_directories(rexcore PUBLIC
@@ -73,7 +78,11 @@ target_include_directories(rexcore PRIVATE
     ${PROJECT_SOURCE_DIR}/thirdparty/cli11/include
 )
 
-if(UNIX)
+if(ANDROID)
+    target_link_libraries(rexcore PRIVATE android log)
+    # sdl3_android_stubs.c needs SDL3 headers
+    target_include_directories(rexcore PRIVATE ${PROJECT_SOURCE_DIR}/thirdparty/sdl3/include)
+elseif(UNIX)
     target_link_libraries(rexcore PRIVATE pthread rt dl)
 endif()
 
