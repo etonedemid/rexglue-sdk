@@ -17,7 +17,9 @@
 #include <rex/system/flags.h>
 #include <rex/system/kernel_state.h>
 #include <rex/kernel/xam/apps/xgi_app.h>
+#include <rex/kernel/xam/achievements_ui.h>
 #include <rex/system/xam/achievement_manager.h>
+#include <rex/system/gamer_profile.h>
 
 #include <imgui.h>
 
@@ -584,6 +586,14 @@ class AchievementsDialog : public XamDialog {
 
     if (ImGui::BeginPopupModal("Achievements", nullptr,
                                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
+      // Gamepad B / Escape closes the dialog
+      if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight) ||
+          ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        ImGui::CloseCurrentPopup();
+        Close();
+        ImGui::EndPopup();
+        return;
+      }
       if (ImGui::BeginTabBar("##tabs")) {
         if (ImGui::BeginTabItem("Game Achievements")) {
           auto* mgr = mgr_;
@@ -592,7 +602,14 @@ class AchievementsDialog : public XamDialog {
           } else {
             const auto& achievements = mgr->achievements();
 
-            // --- Header: gamerscore summary ---
+            // --- Header: gamertag + gamerscore summary ---
+            auto& gp = rex::gamer::GamerProfileManager::instance().profile();
+            if (!gp.gamertag.empty()) {
+              ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.f, 1.f), "%s", gp.gamertag.c_str());
+              ImGui::SameLine();
+              ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.f), "|");
+              ImGui::SameLine();
+            }
             uint32_t total_gs = mgr->GetTotalUnlockedGamerscore();
             uint32_t max_gs = 0;
             for (const auto& a : achievements)
@@ -650,6 +667,11 @@ class AchievementsDialog : public XamDialog {
                 if (ImGui::Button(a.unlocked ? "?" : "X", ImVec2(kIconSize, kIconSize))) {
                   selected_index_ = i;
                 }
+              }
+              // Give default focus to first icon so gamepad nav has a starting point
+              if (i == 0 && !nav_initialized_) {
+                ImGui::SetItemDefaultFocus();
+                nav_initialized_ = true;
               }
               if (ImGui::IsItemFocused()) {
                 selected_index_ = i;
@@ -714,7 +736,8 @@ class AchievementsDialog : public XamDialog {
 
  private:
   bool has_opened_ = false;
-  int selected_index_ = -1;
+  bool nav_initialized_ = false;
+  int selected_index_ = 0;
   rex::system::xam::AchievementManager* mgr_ = nullptr;
 
   std::unordered_map<uint32_t, std::vector<uint8_t>> icon_png_data_;
@@ -775,6 +798,26 @@ ppc_u32_result_t XamShowAchievementsUI_entry(ppc_u32_t user_index, ppc_pvoid_t o
 ppc_u32_result_t XamShowAchievementsUIEx_entry(ppc_u32_t user_index, ppc_u32_t flags,
                                                ppc_pvoid_t overlapped) {
   return XamShowAchievementsUI_entry(user_index, overlapped);
+}
+
+void OpenAchievementsOverlay(rex::ui::ImGuiDrawer* drawer) {
+  if (!drawer) return;
+  auto* kernel_state = REX_KERNEL_STATE();
+  if (!kernel_state) return;
+  auto* xgi_app = static_cast<rex::kernel::xam::apps::XgiApp*>(
+      kernel_state->app_manager()->FindById(0xFB));
+  auto* mgr = xgi_app ? xgi_app->achievement_manager() : nullptr;
+  std::unordered_map<uint32_t, std::vector<uint8_t>> icon_data;
+  if (mgr) {
+    for (const auto& a : mgr->achievements()) {
+      auto png = mgr->GetAchievementIconPng(a.id);
+      if (!png.empty()) {
+        icon_data[a.id] = std::move(png);
+      }
+    }
+  }
+  // Dialog auto-registers with drawer and self-deletes on Close().
+  new AchievementsDialog(drawer, mgr, std::move(icon_data));
 }
 
 // ----------------------------------------------------------------------------
