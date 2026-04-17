@@ -31,13 +31,23 @@ REXCVAR_DEFINE_BOOL(headless, false, "Kernel",
                     "Don't display any UI, using defaults for prompts as needed");
 #include <rex/kernel/xam/private.h>
 #include <rex/ppc/function.h>
-#include <rex/ppc/types.h>
+#include <rex/hook.h>
+#include <rex/types.h>
 #include <rex/system/xtypes.h>
 #include <rex/thread.h>
 #include <rex/ui/imgui_dialog.h>
 #include <rex/ui/imgui_drawer.h>
 #include <rex/ui/window.h>
 #include <rex/ui/windowed_app_context.h>
+
+// Compat type aliases (previously from ppc/types.h, now removed upstream)
+using ppc_u32_t = u32;
+using ppc_u64_t = u64;
+using ppc_u32_result_t = u32;
+using ppc_unknown_t = u32;
+using ppc_pvoid_t = mapped_void;
+using ppc_pu32_t = mapped_u32;
+using ppc_pchar16_t = mapped_wstring;
 
 namespace rex {
 namespace kernel {
