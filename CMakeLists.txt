@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(ReXGlue
-    VERSION 0.7.3
+    VERSION 0.7.6
     LANGUAGES C CXX
     DESCRIPTION "Xbox 360 Recompilation SDK"
 )
@@ -14,22 +14,14 @@ project(ReXGlue
 option(REXGLUE_BUILD_TESTS       "Build PPC instruction and unit tests" OFF)
 option(REXGLUE_ENABLE_SANITIZERS "Enable UndefinedBehaviorSanitizer" OFF)
 option(REXGLUE_ENABLE_FIDELITYFX "Enable optional AMD FidelityFX integration (experimental)" OFF)
-option(REXGLUE_ENABLE_TRACY                "Enable Tracy profiler integration" OFF)
-option(REXGLUE_ENABLE_PERF_COUNTERS        "Enable lightweight perf counter registry and overlay" OFF)
-option(REXGLUE_PROFILE_GUEST_FUNCTIONS     "Enable per-function Tracy zones in recompiled guest code (high overhead)" OFF)
-
+option(REXGLUE_ENABLE_TRACY                "Enable Tracy profiler integration" ON)
+option(REXGLUE_ENABLE_PERF_COUNTERS        "Enable lightweight perf counter registry and overlay" ON)
 # Propagate profiling defines globally (compiled out in Release)
 if(REXGLUE_ENABLE_TRACY)
     add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PROFILING>)
 endif()
 if(REXGLUE_ENABLE_PERF_COUNTERS)
     add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)
-endif()
-if(REXGLUE_PROFILE_GUEST_FUNCTIONS)
-    if(NOT REXGLUE_ENABLE_TRACY)
-        message(FATAL_ERROR "REXGLUE_PROFILE_GUEST_FUNCTIONS requires REXGLUE_ENABLE_TRACY=ON")
-    endif()
-    add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_PROFILE_GUEST_FUNCTIONS>)
 endif()
 
 # Graphics backend selection
@@ -181,6 +173,7 @@ if(REXGLUE_ENABLE_SANITIZERS)
 endif()
 
 if(REXGLUE_BUILD_TESTS)
+    list(APPEND CMAKE_MODULE_PATH "${REXGLUE_ROOT}/cmake")
     list(APPEND CMAKE_MODULE_PATH "${REXGLUE_ROOT}/thirdparty/catch2/extras")
 endif()
 
@@ -215,6 +208,7 @@ endif()
 # Print configuration summary
 message(STATUS "===========================================")
 message(STATUS "ReXGlue Configuration Summary:")
+message(STATUS "  Version: ${PROJECT_VERSION}${REXGLUE_VERSION_SUFFIX}")
 message(STATUS "  Platform: ${REX_PLATFORM}")
 message(STATUS "  Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "  Configurations: ${CMAKE_CONFIGURATION_TYPES}")

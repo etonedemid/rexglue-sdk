@@ -47,7 +47,7 @@ constexpr T byte_swap(T value) noexcept {
 
 template <typename T, std::endian E>
 struct endian_store {
-  using value_type = T;  // Type alias for value() in PPCPointer
+  using value_type = T;  // Type alias for value() in MappedPtr
 
   endian_store() = default;
   endian_store(const T& src) { set(src); }
@@ -103,6 +103,19 @@ template <typename T>
 using le = endian_store<T, std::endian::little>;
 
 //=============================================================================
+// Big-Endian Type Detection
+//=============================================================================
+
+template <typename T>
+struct is_be_type : std::false_type {};
+
+template <typename T>
+struct is_be_type<rex::be<T>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_be_type_v = is_be_type<T>::value;
+
+//=============================================================================
 // Basic Integer Types
 //=============================================================================
 
@@ -145,19 +158,6 @@ using be_i64 = be<i64>;
 
 using be_f32 = be<f32>;
 using be_f64 = be<f64>;
-
-//=============================================================================
-// Big-Endian Type Detection
-//=============================================================================
-
-template <typename T>
-struct is_be_type : std::false_type {};
-
-template <typename T>
-struct is_be_type<rex::be<T>> : std::true_type {};
-
-template <typename T>
-inline constexpr bool is_be_type_v = is_be_type<T>::value;
 
 //=============================================================================
 // MappedPtr - Wraps host pointer with guest address tracking
@@ -385,6 +385,26 @@ struct mapped_ptr_inner_type<MappedPtr<T>> {
 // Global Namespace Exports
 //=============================================================================
 
+using u8 = rex::u8;
+using i8 = rex::i8;
+using u16 = rex::u16;
+using i16 = rex::i16;
+using u32 = rex::u32;
+using i32 = rex::i32;
+using u64 = rex::u64;
+using i64 = rex::i64;
+using f32 = rex::f32;
+using f64 = rex::f64;
+
+using be_u16 = rex::be_u16;
+using be_u32 = rex::be_u32;
+using be_u64 = rex::be_u64;
+using be_i16 = rex::be_i16;
+using be_i32 = rex::be_i32;
+using be_i64 = rex::be_i64;
+using be_f32 = rex::be_f32;
+using be_f64 = rex::be_f64;
+
 using mapped_void = rex::MappedPtr<void>;
 using mapped_u8 = rex::MappedPtr<uint8_t>;
 using mapped_u16 = rex::MappedPtr<rex::be_u16>;
@@ -394,3 +414,7 @@ using mapped_f32 = rex::MappedPtr<rex::be_f32>;
 using mapped_f64 = rex::MappedPtr<rex::be_f64>;
 using mapped_string = rex::MappedPtr<char>;
 using mapped_wstring = rex::MappedPtr<char16_t>;
+
+// Legacy compat alias for ppc_ptr_t<T>
+template <typename T>
+using ppc_ptr_t = rex::MappedPtr<T>;

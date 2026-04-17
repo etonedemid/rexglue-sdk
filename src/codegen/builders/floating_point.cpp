@@ -207,8 +207,8 @@ bool build_fmadd(BuilderContext& ctx) {
 
 bool build_fmadds(BuilderContext& ctx) {
   ctx.emit_set_flush_mode(false);
-  ctx.println("\t{}.f64 = double(float(std::fma({}.f64, {}.f64, {}.f64)));", ctx.f(ctx.insn.operands[0]),
-              ctx.f(ctx.insn.operands[1]), ctx.f(ctx.insn.operands[2]),
+  ctx.println("\t{}.f64 = double(float(std::fma({}.f64, {}.f64, {}.f64)));",
+              ctx.f(ctx.insn.operands[0]), ctx.f(ctx.insn.operands[1]), ctx.f(ctx.insn.operands[2]),
               ctx.f(ctx.insn.operands[3]));
   return true;
 }
@@ -223,8 +223,8 @@ bool build_fmsub(BuilderContext& ctx) {
 
 bool build_fmsubs(BuilderContext& ctx) {
   ctx.emit_set_flush_mode(false);
-  ctx.println("\t{}.f64 = double(float(std::fma({}.f64, {}.f64, -{}.f64)));", ctx.f(ctx.insn.operands[0]),
-              ctx.f(ctx.insn.operands[1]), ctx.f(ctx.insn.operands[2]),
+  ctx.println("\t{}.f64 = double(float(std::fma({}.f64, {}.f64, -{}.f64)));",
+              ctx.f(ctx.insn.operands[0]), ctx.f(ctx.insn.operands[1]), ctx.f(ctx.insn.operands[2]),
               ctx.f(ctx.insn.operands[3]));
   return true;
 }
@@ -239,8 +239,8 @@ bool build_fnmadd(BuilderContext& ctx) {
 
 bool build_fnmadds(BuilderContext& ctx) {
   ctx.emit_set_flush_mode(false);
-  ctx.println("\t{}.f64 = double(float(-std::fma({}.f64, {}.f64, {}.f64)));", ctx.f(ctx.insn.operands[0]),
-              ctx.f(ctx.insn.operands[1]), ctx.f(ctx.insn.operands[2]),
+  ctx.println("\t{}.f64 = double(float(-std::fma({}.f64, {}.f64, {}.f64)));",
+              ctx.f(ctx.insn.operands[0]), ctx.f(ctx.insn.operands[1]), ctx.f(ctx.insn.operands[2]),
               ctx.f(ctx.insn.operands[3]));
   return true;
 }
@@ -255,8 +255,8 @@ bool build_fnmsub(BuilderContext& ctx) {
 
 bool build_fnmsubs(BuilderContext& ctx) {
   ctx.emit_set_flush_mode(false);
-  ctx.println("\t{}.f64 = double(float(-std::fma({}.f64, {}.f64, -{}.f64)));", ctx.f(ctx.insn.operands[0]),
-              ctx.f(ctx.insn.operands[1]), ctx.f(ctx.insn.operands[2]),
+  ctx.println("\t{}.f64 = double(float(-std::fma({}.f64, {}.f64, -{}.f64)));",
+              ctx.f(ctx.insn.operands[0]), ctx.f(ctx.insn.operands[1]), ctx.f(ctx.insn.operands[2]),
               ctx.f(ctx.insn.operands[3]));
   return true;
 }

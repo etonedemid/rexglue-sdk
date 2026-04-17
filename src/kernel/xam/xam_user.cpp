@@ -15,12 +15,11 @@
 #include <cstring>
 
 #include <rex/cvar.h>
-#include <rex/kernel/xam/apps/xgi_app.h>
 #include <rex/kernel/xam/private.h>
 #include <rex/logging.h>
 #include <rex/math.h>
-#include <rex/ppc/function.h>
-#include <rex/ppc/types.h>
+#include <rex/hook.h>
+#include <rex/types.h>
 #include <rex/string/util.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/xam/user_profile.h>
@@ -37,8 +36,7 @@ namespace xam {
 using namespace rex::system;
 using namespace rex::system::xam;
 
-ppc_hresult_result_t XamUserGetXUID_entry(ppc_u32_t user_index, ppc_u32_t type_mask,
-                                          ppc_pu64_t xuid_ptr) {
+i32 XamUserGetXUID_entry(u32 user_index, u32 type_mask, mapped_u64 xuid_ptr) {
   assert_true(type_mask == 1 || type_mask == 2 || type_mask == 3 || type_mask == 4 ||
               type_mask == 7);
   if (!xuid_ptr) {
@@ -67,7 +65,7 @@ ppc_hresult_result_t XamUserGetXUID_entry(ppc_u32_t user_index, ppc_u32_t type_m
   return result;
 }
 
-ppc_u32_result_t XamUserGetSigninState_entry(ppc_u32_t user_index) {
+u32 XamUserGetSigninState_entry(u32 user_index) {
   uint32_t signin_state = 0;
   if (user_index < 4) {
     if (user_index == 0) {
@@ -88,8 +86,7 @@ typedef struct {
 } X_USER_SIGNIN_INFO;
 static_assert_size(X_USER_SIGNIN_INFO, 40);
 
-ppc_hresult_result_t XamUserGetSigninInfo_entry(ppc_u32_t user_index, ppc_u32_t flags,
-                                                ppc_ptr_t<X_USER_SIGNIN_INFO> info) {
+i32 XamUserGetSigninInfo_entry(u32 user_index, u32 flags, ppc_ptr_t<X_USER_SIGNIN_INFO> info) {
   if (!info) {
     return X_E_INVALIDARG;
   }
@@ -106,8 +103,7 @@ ppc_hresult_result_t XamUserGetSigninInfo_entry(ppc_u32_t user_index, ppc_u32_t 
   return X_E_SUCCESS;
 }
 
-ppc_u32_result_t XamUserGetName_entry(ppc_u32_t user_index, ppc_pchar_t buffer,
-                                      ppc_u32_t buffer_len) {
+u32 XamUserGetName_entry(u32 user_index, mapped_string buffer, u32 buffer_len) {
   if (user_index >= 4) {
     return X_E_INVALIDARG;
   }
@@ -118,12 +114,11 @@ ppc_u32_result_t XamUserGetName_entry(ppc_u32_t user_index, ppc_pchar_t buffer,
 
   const auto& user_profile = REX_KERNEL_STATE()->user_profile();
   const auto& user_name = user_profile->name();
-  rex::string::util_copy_truncating(buffer, user_name, std::min(buffer_len.value(), uint32_t(16)));
+  rex::string::util_copy_truncating(buffer, user_name, std::min(buffer_len, uint32_t(16)));
   return X_E_SUCCESS;
 }
 
-ppc_u32_result_t XamUserGetGamerTag_entry(ppc_u32_t user_index, ppc_pchar16_t buffer,
-                                          ppc_u32_t buffer_len) {
+u32 XamUserGetGamerTag_entry(u32 user_index, mapped_wstring buffer, u32 buffer_len) {
   if (user_index >= 4) {
     return X_E_INVALIDARG;
   }
@@ -138,8 +133,7 @@ ppc_u32_result_t XamUserGetGamerTag_entry(ppc_u32_t user_index, ppc_pchar16_t bu
 
   const auto& user_profile = REX_KERNEL_STATE()->user_profile();
   auto user_name = rex::string::to_utf16(user_profile->name());
-  rex::string::util_copy_and_swap_truncating(buffer, user_name,
-                                             std::min(buffer_len.value(), uint32_t(16)));
+  rex::string::util_copy_and_swap_truncating(buffer, user_name, std::min(buffer_len, uint32_t(16)));
   return X_E_SUCCESS;
 }
 
@@ -290,30 +284,26 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index, ui
   return X_ERROR_SUCCESS;
 }
 
-ppc_u32_result_t XamUserReadProfileSettings_entry(ppc_u32_t title_id, ppc_u32_t user_index,
-                                                  ppc_u32_t xuid_count, ppc_pu64_t xuids,
-                                                  ppc_u32_t setting_count, ppc_pu32_t setting_ids,
-                                                  ppc_pu32_t buffer_size_ptr,
-                                                  ppc_pvoid_t buffer_ptr,
-                                                  ppc_ptr_t<XAM_OVERLAPPED> overlapped) {
+u32 XamUserReadProfileSettings_entry(u32 title_id, u32 user_index, u32 xuid_count, mapped_u64 xuids,
+                                     u32 setting_count, mapped_u32 setting_ids,
+                                     mapped_u32 buffer_size_ptr, mapped_void buffer_ptr,
+                                     ppc_ptr_t<XAM_OVERLAPPED> overlapped) {
   return XamUserReadProfileSettingsEx(title_id, user_index, xuid_count, xuids, setting_count,
                                       setting_ids, 0, buffer_size_ptr, buffer_ptr, overlapped);
 }
 
-ppc_u32_result_t XamUserReadProfileSettingsEx_entry(ppc_u32_t title_id, ppc_u32_t user_index,
-                                                    ppc_u32_t xuid_count, ppc_pu64_t xuids,
-                                                    ppc_u32_t setting_count, ppc_pu32_t setting_ids,
-                                                    ppc_pu32_t buffer_size_ptr, ppc_u32_t unk_2,
-                                                    ppc_pvoid_t buffer_ptr,
-                                                    ppc_ptr_t<XAM_OVERLAPPED> overlapped) {
+u32 XamUserReadProfileSettingsEx_entry(u32 title_id, u32 user_index, u32 xuid_count,
+                                       mapped_u64 xuids, u32 setting_count, mapped_u32 setting_ids,
+                                       mapped_u32 buffer_size_ptr, u32 unk_2,
+                                       mapped_void buffer_ptr,
+                                       ppc_ptr_t<XAM_OVERLAPPED> overlapped) {
   return XamUserReadProfileSettingsEx(title_id, user_index, xuid_count, xuids, setting_count,
                                       setting_ids, unk_2, buffer_size_ptr, buffer_ptr, overlapped);
 }
 
-ppc_u32_result_t XamUserWriteProfileSettings_entry(ppc_u32_t title_id, ppc_u32_t user_index,
-                                                   ppc_u32_t setting_count,
-                                                   ppc_ptr_t<X_USER_PROFILE_SETTING> settings,
-                                                   ppc_ptr_t<XAM_OVERLAPPED> overlapped) {
+u32 XamUserWriteProfileSettings_entry(u32 title_id, u32 user_index, u32 setting_count,
+                                      ppc_ptr_t<X_USER_PROFILE_SETTING> settings,
+                                      ppc_ptr_t<XAM_OVERLAPPED> overlapped) {
   if (!setting_count || !settings) {
     return X_ERROR_INVALID_PARAMETER;
   }
@@ -380,8 +370,7 @@ ppc_u32_result_t XamUserWriteProfileSettings_entry(ppc_u32_t title_id, ppc_u32_t
   return X_ERROR_SUCCESS;
 }
 
-ppc_u32_result_t XamUserCheckPrivilege_entry(ppc_u32_t user_index, ppc_u32_t mask,
-                                             ppc_pu32_t out_value) {
+u32 XamUserCheckPrivilege_entry(u32 user_index, u32 mask, mapped_u32 out_value) {
   // checking all users?
   if (user_index != 0xFF) {
     if (user_index >= 4) {
@@ -398,8 +387,7 @@ ppc_u32_result_t XamUserCheckPrivilege_entry(ppc_u32_t user_index, ppc_u32_t mas
   return X_ERROR_SUCCESS;
 }
 
-ppc_u32_result_t XamUserContentRestrictionGetFlags_entry(ppc_u32_t user_index,
-                                                         ppc_pu32_t out_flags) {
+u32 XamUserContentRestrictionGetFlags_entry(u32 user_index, mapped_u32 out_flags) {
   if (user_index) {
     return X_ERROR_NO_SUCH_USER;
   }
@@ -409,9 +397,8 @@ ppc_u32_result_t XamUserContentRestrictionGetFlags_entry(ppc_u32_t user_index,
   return X_ERROR_SUCCESS;
 }
 
-ppc_u32_result_t XamUserContentRestrictionGetRating_entry(ppc_u32_t user_index, ppc_u32_t unk1,
-                                                          ppc_pu32_t out_unk2,
-                                                          ppc_pu32_t out_unk3) {
+u32 XamUserContentRestrictionGetRating_entry(u32 user_index, u32 unk1, mapped_u32 out_unk2,
+                                             mapped_u32 out_unk3) {
   if (user_index) {
     return X_ERROR_NO_SUCH_USER;
   }
@@ -423,10 +410,8 @@ ppc_u32_result_t XamUserContentRestrictionGetRating_entry(ppc_u32_t user_index, 
   return X_ERROR_SUCCESS;
 }
 
-ppc_u32_result_t XamUserContentRestrictionCheckAccess_entry(ppc_u32_t user_index, ppc_u32_t unk1,
-                                                            ppc_u32_t unk2, ppc_u32_t unk3,
-                                                            ppc_u32_t unk4, ppc_pu32_t out_unk5,
-                                                            ppc_u32_t overlapped_ptr) {
+u32 XamUserContentRestrictionCheckAccess_entry(u32 user_index, u32 unk1, u32 unk2, u32 unk3,
+                                               u32 unk4, mapped_u32 out_unk5, u32 overlapped_ptr) {
   *out_unk5 = 1;
 
   if (overlapped_ptr) {
@@ -437,11 +422,11 @@ ppc_u32_result_t XamUserContentRestrictionCheckAccess_entry(ppc_u32_t user_index
   return X_ERROR_SUCCESS;
 }
 
-ppc_u32_result_t XamUserIsOnlineEnabled_entry(ppc_u32_t user_index) {
+u32 XamUserIsOnlineEnabled_entry(u32 user_index) {
   return 1;
 }
 
-ppc_u32_result_t XamUserGetMembershipTier_entry(ppc_u32_t user_index) {
+u32 XamUserGetMembershipTier_entry(u32 user_index) {
   if (user_index >= 4) {
     return X_ERROR_INVALID_PARAMETER;
   }
@@ -451,8 +436,8 @@ ppc_u32_result_t XamUserGetMembershipTier_entry(ppc_u32_t user_index) {
   return 6 /* 6 appears to be Gold */;
 }
 
-ppc_u32_result_t XamUserAreUsersFriends_entry(ppc_u32_t user_index, ppc_u32_t unk1, ppc_u32_t unk2,
-                                              ppc_pu32_t out_value, ppc_u32_t overlapped_ptr) {
+u32 XamUserAreUsersFriends_entry(u32 user_index, u32 unk1, u32 unk2, mapped_u32 out_value,
+                                 u32 overlapped_ptr) {
   uint32_t are_friends = 0;
   X_RESULT result;
 
@@ -490,7 +475,7 @@ ppc_u32_result_t XamUserAreUsersFriends_entry(ppc_u32_t user_index, ppc_u32_t un
   }
 }
 
-ppc_u32_result_t XamShowSigninUI_entry(ppc_u32_t unk, ppc_u32_t unk_mask) {
+u32 XamShowSigninUI_entry(u32 unk, u32 unk_mask) {
   // Mask values vary. Probably matching user types? Local/remote?
 
   // To fix game modes that display a 4 profile signin UI (even if playing
@@ -503,26 +488,176 @@ ppc_u32_result_t XamShowSigninUI_entry(ppc_u32_t unk, ppc_u32_t unk_mask) {
   return X_ERROR_SUCCESS;
 }
 
-ppc_u32_result_t XamUserCreateAchievementEnumerator_entry(ppc_u32_t title_id, ppc_u32_t user_index,
-                                                          ppc_u32_t xuid, ppc_u32_t flags,
-                                                          ppc_u32_t offset, ppc_u32_t count,
-                                                          ppc_pu32_t buffer_size_ptr,
-                                                          ppc_pu32_t handle_ptr) {
-  return X_ERROR_FUNCTION_FAILED;
+// TODO(gibbed): probably a FILETIME/LARGE_INTEGER, unknown currently
+struct X_ACHIEVEMENT_UNLOCK_TIME {
+  rex::be<uint32_t> unk_0;
+  rex::be<uint32_t> unk_4;
+};
+
+struct X_ACHIEVEMENT_DETAILS {
+  rex::be<uint32_t> id;
+  rex::be<uint32_t> label_ptr;
+  rex::be<uint32_t> description_ptr;
+  rex::be<uint32_t> unachieved_ptr;
+  rex::be<uint32_t> image_id;
+  rex::be<uint32_t> gamerscore;
+  X_ACHIEVEMENT_UNLOCK_TIME unlock_time;
+  rex::be<uint32_t> flags;
+
+  static const size_t kStringBufferSize = 464;
+};
+static_assert_size(X_ACHIEVEMENT_DETAILS, 36);
+
+class XStaticAchievementEnumerator : public XEnumerator {
+ public:
+  struct AchievementDetails {
+    uint32_t id;
+    std::u16string label;
+    std::u16string description;
+    std::u16string unachieved;
+    uint32_t image_id;
+    uint32_t gamerscore;
+    struct {
+      uint32_t unk_0;
+      uint32_t unk_4;
+    } unlock_time;
+    uint32_t flags;
+  };
+
+  XStaticAchievementEnumerator(KernelState* kernel_state, size_t items_per_enumerate,
+                               uint32_t flags)
+      : XEnumerator(kernel_state, items_per_enumerate,
+                    sizeof(X_ACHIEVEMENT_DETAILS) +
+                        (!!(flags & 7) ? X_ACHIEVEMENT_DETAILS::kStringBufferSize : 0)),
+        flags_(flags) {}
+
+  void AppendItem(AchievementDetails item) { items_.push_back(std::move(item)); }
+
+  uint32_t WriteItems(uint32_t buffer_ptr, uint8_t* buffer_data, uint32_t* written_count) override {
+    size_t count = std::min(items_.size() - current_item_, items_per_enumerate());
+    if (!count) {
+      return X_ERROR_NO_MORE_FILES;
+    }
+
+    size_t size = count * item_size();
+
+    auto details = reinterpret_cast<X_ACHIEVEMENT_DETAILS*>(buffer_data);
+    size_t string_offset = items_per_enumerate() * sizeof(X_ACHIEVEMENT_DETAILS);
+    auto string_buffer =
+        StringBuffer{buffer_ptr + static_cast<uint32_t>(string_offset), &buffer_data[string_offset],
+                     count * X_ACHIEVEMENT_DETAILS::kStringBufferSize};
+    for (size_t i = 0, o = current_item_; i < count; ++i, ++current_item_) {
+      const auto& item = items_[current_item_];
+      details[i].id = item.id;
+      details[i].label_ptr = !!(flags_ & 1) ? AppendString(string_buffer, item.label) : 0;
+      details[i].description_ptr =
+          !!(flags_ & 2) ? AppendString(string_buffer, item.description) : 0;
+      details[i].unachieved_ptr = !!(flags_ & 4) ? AppendString(string_buffer, item.unachieved) : 0;
+      details[i].image_id = item.image_id;
+      details[i].gamerscore = item.gamerscore;
+      details[i].unlock_time.unk_0 = item.unlock_time.unk_0;
+      details[i].unlock_time.unk_4 = item.unlock_time.unk_4;
+      details[i].flags = item.flags;
+    }
+
+    if (written_count) {
+      *written_count = static_cast<uint32_t>(count);
+    }
+
+    return X_ERROR_SUCCESS;
+  }
+
+ private:
+  struct StringBuffer {
+    uint32_t ptr;
+    uint8_t* data;
+    size_t remaining_bytes;
+  };
+
+  uint32_t AppendString(StringBuffer& sb, const std::u16string_view string) {
+    size_t count = string.length() + 1;
+    size_t size = count * sizeof(char16_t);
+    if (size > sb.remaining_bytes) {
+      assert_always();
+      return 0;
+    }
+    auto ptr = sb.ptr;
+    rex::string::util_copy_and_swap_truncating(reinterpret_cast<char16_t*>(sb.data), string, count);
+    sb.ptr += static_cast<uint32_t>(size);
+    sb.data += size;
+    sb.remaining_bytes -= size;
+    return ptr;
+  }
+
+ private:
+  uint32_t flags_;
+  std::vector<AchievementDetails> items_;
+  size_t current_item_ = 0;
+};
+
+u32 XamUserCreateAchievementEnumerator_entry(u32 title_id, u32 user_index, u32 xuid, u32 flags,
+                                             u32 offset, u32 count, mapped_u32 buffer_size_ptr,
+                                             mapped_u32 handle_ptr) {
+  if (!count || !buffer_size_ptr || !handle_ptr) {
+    return X_ERROR_INVALID_PARAMETER;
+  }
+
+  if (user_index >= 4) {
+    return X_ERROR_INVALID_PARAMETER;
+  }
+
+  size_t entry_size = sizeof(X_ACHIEVEMENT_DETAILS);
+  if (flags & 7) {
+    entry_size += X_ACHIEVEMENT_DETAILS::kStringBufferSize;
+  }
+
+  if (buffer_size_ptr) {
+    *buffer_size_ptr = static_cast<uint32_t>(entry_size) * count;
+  }
+
+  auto e = object_ref<XStaticAchievementEnumerator>(
+      new XStaticAchievementEnumerator(REX_KERNEL_STATE(), count, flags));
+  auto result = e->Initialize(user_index, 0xFB, 0xB000A, 0xB000B, 0);
+  if (XFAILED(result)) {
+    return result;
+  }
+
+  const util::XdbfGameData db = REX_KERNEL_STATE()->title_xdbf();
+
+  if (db.is_valid()) {
+    const XLanguage language =
+        db.GetExistingLanguage(static_cast<XLanguage>(REXCVAR_GET(user_language)));
+    const std::vector<util::XdbfAchievementTableEntry> achievement_list = db.GetAchievements();
+
+    for (const util::XdbfAchievementTableEntry& entry : achievement_list) {
+      auto item = XStaticAchievementEnumerator::AchievementDetails{
+          entry.id,
+          rex::string::to_utf16(db.GetStringTableEntry(language, entry.label_id)),
+          rex::string::to_utf16(db.GetStringTableEntry(language, entry.description_id)),
+          rex::string::to_utf16(db.GetStringTableEntry(language, entry.unachieved_id)),
+          entry.image_id,
+          entry.gamerscore,
+          {0, 0},
+          entry.flags};
+
+      e->AppendItem(item);
+    }
+  }
+
+  *handle_ptr = e->handle();
+  return X_ERROR_SUCCESS;
 }
 
-ppc_u32_result_t XamParseGamerTileKey_entry(ppc_pu32_t key_ptr, ppc_pu32_t out1_ptr,
-                                            ppc_pu32_t out2_ptr, ppc_pu32_t out3_ptr) {
+u32 XamParseGamerTileKey_entry(mapped_u32 key_ptr, mapped_u32 out1_ptr, mapped_u32 out2_ptr,
+                               mapped_u32 out3_ptr) {
   *out1_ptr = 0xC0DE0001;
   *out2_ptr = 0xC0DE0002;
   *out3_ptr = 0xC0DE0003;
   return X_ERROR_SUCCESS;
 }
 
-ppc_u32_result_t XamReadTileToTexture_entry(ppc_u32_t unknown, ppc_u32_t title_id,
-                                            ppc_u64_t tile_id, ppc_u32_t user_index,
-                                            ppc_pvoid_t buffer_ptr, ppc_u32_t stride,
-                                            ppc_u32_t height, ppc_u32_t overlapped_ptr) {
+u32 XamReadTileToTexture_entry(u32 unknown, u32 title_id, u64 tile_id, u32 user_index,
+                               mapped_void buffer_ptr, u32 stride, u32 height, u32 overlapped_ptr) {
   // TODO(gibbed): unknown=0,2,3,9
   if (!tile_id) {
     return X_ERROR_INVALID_PARAMETER;
@@ -538,8 +673,7 @@ ppc_u32_result_t XamReadTileToTexture_entry(ppc_u32_t unknown, ppc_u32_t title_i
   return X_ERROR_SUCCESS;
 }
 
-ppc_u32_result_t XamWriteGamerTile_entry(ppc_u32_t arg1, ppc_u32_t arg2, ppc_u32_t arg3,
-                                         ppc_u32_t arg4, ppc_u32_t arg5, ppc_u32_t overlapped_ptr) {
+u32 XamWriteGamerTile_entry(u32 arg1, u32 arg2, u32 arg3, u32 arg4, u32 arg5, u32 overlapped_ptr) {
   if (overlapped_ptr) {
     REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr, X_ERROR_SUCCESS);
     return X_ERROR_IO_PENDING;
@@ -547,12 +681,12 @@ ppc_u32_result_t XamWriteGamerTile_entry(ppc_u32_t arg1, ppc_u32_t arg2, ppc_u32
   return X_ERROR_SUCCESS;
 }
 
-ppc_u32_result_t XamSessionCreateHandle_entry(ppc_pu32_t handle_ptr) {
+u32 XamSessionCreateHandle_entry(mapped_u32 handle_ptr) {
   *handle_ptr = 0xCAFEDEAD;
   return X_ERROR_SUCCESS;
 }
 
-ppc_u32_result_t XamSessionRefObjByHandle_entry(ppc_u32_t handle, ppc_pu32_t obj_ptr) {
+u32 XamSessionRefObjByHandle_entry(u32 handle, mapped_u32 obj_ptr) {
   assert_true(handle == 0xCAFEDEAD);
   // TODO(PermaNull): Implement this properly,
   // For the time being returning 0xDEADF00D will prevent crashing.
@@ -564,88 +698,88 @@ ppc_u32_result_t XamSessionRefObjByHandle_entry(ppc_u32_t handle, ppc_pu32_t obj
 }  // namespace kernel
 }  // namespace rex
 
-XAM_EXPORT(__imp__XamUserGetXUID, rex::kernel::xam::XamUserGetXUID_entry)
-XAM_EXPORT(__imp__XamUserGetSigninState, rex::kernel::xam::XamUserGetSigninState_entry)
-XAM_EXPORT(__imp__XamUserGetSigninInfo, rex::kernel::xam::XamUserGetSigninInfo_entry)
-XAM_EXPORT(__imp__XamUserGetName, rex::kernel::xam::XamUserGetName_entry)
-XAM_EXPORT(__imp__XamUserGetGamerTag, rex::kernel::xam::XamUserGetGamerTag_entry)
-XAM_EXPORT(__imp__XamUserReadProfileSettings, rex::kernel::xam::XamUserReadProfileSettings_entry)
-XAM_EXPORT(__imp__XamUserReadProfileSettingsEx,
+REX_EXPORT(__imp__XamUserGetXUID, rex::kernel::xam::XamUserGetXUID_entry)
+REX_EXPORT(__imp__XamUserGetSigninState, rex::kernel::xam::XamUserGetSigninState_entry)
+REX_EXPORT(__imp__XamUserGetSigninInfo, rex::kernel::xam::XamUserGetSigninInfo_entry)
+REX_EXPORT(__imp__XamUserGetName, rex::kernel::xam::XamUserGetName_entry)
+REX_EXPORT(__imp__XamUserGetGamerTag, rex::kernel::xam::XamUserGetGamerTag_entry)
+REX_EXPORT(__imp__XamUserReadProfileSettings, rex::kernel::xam::XamUserReadProfileSettings_entry)
+REX_EXPORT(__imp__XamUserReadProfileSettingsEx,
            rex::kernel::xam::XamUserReadProfileSettingsEx_entry)
-XAM_EXPORT(__imp__XamUserWriteProfileSettings, rex::kernel::xam::XamUserWriteProfileSettings_entry)
-XAM_EXPORT(__imp__XamUserCheckPrivilege, rex::kernel::xam::XamUserCheckPrivilege_entry)
-XAM_EXPORT(__imp__XamUserContentRestrictionGetFlags,
+REX_EXPORT(__imp__XamUserWriteProfileSettings, rex::kernel::xam::XamUserWriteProfileSettings_entry)
+REX_EXPORT(__imp__XamUserCheckPrivilege, rex::kernel::xam::XamUserCheckPrivilege_entry)
+REX_EXPORT(__imp__XamUserContentRestrictionGetFlags,
            rex::kernel::xam::XamUserContentRestrictionGetFlags_entry)
-XAM_EXPORT(__imp__XamUserContentRestrictionGetRating,
+REX_EXPORT(__imp__XamUserContentRestrictionGetRating,
            rex::kernel::xam::XamUserContentRestrictionGetRating_entry)
-XAM_EXPORT(__imp__XamUserContentRestrictionCheckAccess,
+REX_EXPORT(__imp__XamUserContentRestrictionCheckAccess,
            rex::kernel::xam::XamUserContentRestrictionCheckAccess_entry)
-XAM_EXPORT(__imp__XamUserIsOnlineEnabled, rex::kernel::xam::XamUserIsOnlineEnabled_entry)
-XAM_EXPORT(__imp__XamUserGetMembershipTier, rex::kernel::xam::XamUserGetMembershipTier_entry)
-XAM_EXPORT(__imp__XamUserAreUsersFriends, rex::kernel::xam::XamUserAreUsersFriends_entry)
-XAM_EXPORT(__imp__XamShowSigninUI, rex::kernel::xam::XamShowSigninUI_entry)
-XAM_EXPORT(__imp__XamUserCreateAchievementEnumerator,
+REX_EXPORT(__imp__XamUserIsOnlineEnabled, rex::kernel::xam::XamUserIsOnlineEnabled_entry)
+REX_EXPORT(__imp__XamUserGetMembershipTier, rex::kernel::xam::XamUserGetMembershipTier_entry)
+REX_EXPORT(__imp__XamUserAreUsersFriends, rex::kernel::xam::XamUserAreUsersFriends_entry)
+REX_EXPORT(__imp__XamShowSigninUI, rex::kernel::xam::XamShowSigninUI_entry)
+REX_EXPORT(__imp__XamUserCreateAchievementEnumerator,
            rex::kernel::xam::XamUserCreateAchievementEnumerator_entry)
-XAM_EXPORT(__imp__XamParseGamerTileKey, rex::kernel::xam::XamParseGamerTileKey_entry)
-XAM_EXPORT(__imp__XamReadTileToTexture, rex::kernel::xam::XamReadTileToTexture_entry)
-XAM_EXPORT(__imp__XamWriteGamerTile, rex::kernel::xam::XamWriteGamerTile_entry)
-XAM_EXPORT(__imp__XamSessionCreateHandle, rex::kernel::xam::XamSessionCreateHandle_entry)
-XAM_EXPORT(__imp__XamSessionRefObjByHandle, rex::kernel::xam::XamSessionRefObjByHandle_entry)
+REX_EXPORT(__imp__XamParseGamerTileKey, rex::kernel::xam::XamParseGamerTileKey_entry)
+REX_EXPORT(__imp__XamReadTileToTexture, rex::kernel::xam::XamReadTileToTexture_entry)
+REX_EXPORT(__imp__XamWriteGamerTile, rex::kernel::xam::XamWriteGamerTile_entry)
+REX_EXPORT(__imp__XamSessionCreateHandle, rex::kernel::xam::XamSessionCreateHandle_entry)
+REX_EXPORT(__imp__XamSessionRefObjByHandle, rex::kernel::xam::XamSessionRefObjByHandle_entry)
 
-XAM_EXPORT_STUB(__imp__XamUserAddRecentPlayer);
-XAM_EXPORT_STUB(__imp__XamUserAllowedToPostToSocialNetwork);
-XAM_EXPORT_STUB(__imp__XamUserCreateAvatarAssetEnumerator);
-XAM_EXPORT_STUB(__imp__XamUserCreatePlayerEnumerator);
-XAM_EXPORT_STUB(__imp__XamUserCreateStatsEnumerator);
-XAM_EXPORT_STUB(__imp__XamUserCreateTitlesPlayedEnumerator);
-XAM_EXPORT_STUB(__imp__XamUserFlushLogonQueue);
-XAM_EXPORT_STUB(__imp__XamUserGetAge);
-XAM_EXPORT_STUB(__imp__XamUserGetAgeGroup);
-XAM_EXPORT_STUB(__imp__XamUserGetCachedUserFlags);
-XAM_EXPORT_STUB(__imp__XamUserGetDeviceId);
-XAM_EXPORT_STUB(__imp__XamUserGetIndexFromXUID);
-XAM_EXPORT_STUB(__imp__XamUserGetMembershipTierFromXUID);
-XAM_EXPORT_STUB(__imp__XamUserGetOnlineCountryFromXUID);
-XAM_EXPORT_STUB(__imp__XamUserGetOnlineLanguageFromXUID);
-XAM_EXPORT_STUB(__imp__XamUserGetOnlineXUIDFromOfflineXUID);
-XAM_EXPORT_STUB(__imp__XamUserGetReportingInfo);
-XAM_EXPORT_STUB(__imp__XamUserGetRequestedUserIndexMask);
-XAM_EXPORT_STUB(__imp__XamUserGetSubscriptionType);
-XAM_EXPORT_STUB(__imp__XamUserGetUserFlags);
-XAM_EXPORT_STUB(__imp__XamUserGetUserFlagsFromXUID);
-XAM_EXPORT_STUB(__imp__XamUserGetUserIndexMask);
-XAM_EXPORT_STUB(__imp__XamUserGetUserTenure);
-XAM_EXPORT_STUB(__imp__XamUserGetUsersMissingAvatars);
-XAM_EXPORT_STUB(__imp__XamUserGetXUIDForTFA);
-XAM_EXPORT_STUB(__imp__XamUserInvalidateProfileSetting);
-XAM_EXPORT_STUB(__imp__XamUserIsGuest);
-XAM_EXPORT_STUB(__imp__XamUserIsLogonPreviewModeEnabled);
-XAM_EXPORT_STUB(__imp__XamUserIsParentalControlled);
-XAM_EXPORT_STUB(__imp__XamUserIsPartial);
-XAM_EXPORT_STUB(__imp__XamUserIsPartialProfile);
-XAM_EXPORT_STUB(__imp__XamUserIsUnsafeProgrammingAllowed);
-XAM_EXPORT_STUB(__imp__XamUserLockLogonPreviewMode);
-XAM_EXPORT_STUB(__imp__XamUserLogon);
-XAM_EXPORT_STUB(__imp__XamUserLogonEx);
-XAM_EXPORT_STUB(__imp__XamUserLookupDevice);
-XAM_EXPORT_STUB(__imp__XamUserNuiBind);
-XAM_EXPORT_STUB(__imp__XamUserNuiEnableBiometric);
-XAM_EXPORT_STUB(__imp__XamUserNuiGetEnrollmentIndex);
-XAM_EXPORT_STUB(__imp__XamUserNuiGetUserIndex);
-XAM_EXPORT_STUB(__imp__XamUserNuiGetUserIndexForBind);
-XAM_EXPORT_STUB(__imp__XamUserNuiGetUserIndexForSignin);
-XAM_EXPORT_STUB(__imp__XamUserNuiIsBiometricEnabled);
-XAM_EXPORT_STUB(__imp__XamUserNuiUnbind);
-XAM_EXPORT_STUB(__imp__XamUserOverrideBindingCallbacks);
-XAM_EXPORT_STUB(__imp__XamUserOverrideDeviceBindings);
-XAM_EXPORT_STUB(__imp__XamUserOverrideGlobalState);
-XAM_EXPORT_STUB(__imp__XamUserOverrideUserInfo);
-XAM_EXPORT_STUB(__imp__XamUserPrefetchProfileSettings);
-XAM_EXPORT_STUB(__imp__XamUserProfileSync);
-XAM_EXPORT_STUB(__imp__XamUserReadUserPreference);
-XAM_EXPORT_STUB(__imp__XamUserResetSubscriptionType);
-XAM_EXPORT_STUB(__imp__XamUserUnlockLogonPreviewMode);
-XAM_EXPORT_STUB(__imp__XamUserUpdateRecentPlayer);
-XAM_EXPORT_STUB(__imp__XamUserValidateAvatarManifest);
-XAM_EXPORT_STUB(__imp__XamUserWriteUserPreference);
-XAM_EXPORT_STUB(__imp__XamVerifyPasscode);
+REX_EXPORT_STUB(__imp__XamUserAddRecentPlayer);
+REX_EXPORT_STUB(__imp__XamUserAllowedToPostToSocialNetwork);
+REX_EXPORT_STUB(__imp__XamUserCreateAvatarAssetEnumerator);
+REX_EXPORT_STUB(__imp__XamUserCreatePlayerEnumerator);
+REX_EXPORT_STUB(__imp__XamUserCreateStatsEnumerator);
+REX_EXPORT_STUB(__imp__XamUserCreateTitlesPlayedEnumerator);
+REX_EXPORT_STUB(__imp__XamUserFlushLogonQueue);
+REX_EXPORT_STUB(__imp__XamUserGetAge);
+REX_EXPORT_STUB(__imp__XamUserGetAgeGroup);
+REX_EXPORT_STUB(__imp__XamUserGetCachedUserFlags);
+REX_EXPORT_STUB(__imp__XamUserGetDeviceId);
+REX_EXPORT_STUB(__imp__XamUserGetIndexFromXUID);
+REX_EXPORT_STUB(__imp__XamUserGetMembershipTierFromXUID);
+REX_EXPORT_STUB(__imp__XamUserGetOnlineCountryFromXUID);
+REX_EXPORT_STUB(__imp__XamUserGetOnlineLanguageFromXUID);
+REX_EXPORT_STUB(__imp__XamUserGetOnlineXUIDFromOfflineXUID);
+REX_EXPORT_STUB(__imp__XamUserGetReportingInfo);
+REX_EXPORT_STUB(__imp__XamUserGetRequestedUserIndexMask);
+REX_EXPORT_STUB(__imp__XamUserGetSubscriptionType);
+REX_EXPORT_STUB(__imp__XamUserGetUserFlags);
+REX_EXPORT_STUB(__imp__XamUserGetUserFlagsFromXUID);
+REX_EXPORT_STUB(__imp__XamUserGetUserIndexMask);
+REX_EXPORT_STUB(__imp__XamUserGetUserTenure);
+REX_EXPORT_STUB(__imp__XamUserGetUsersMissingAvatars);
+REX_EXPORT_STUB(__imp__XamUserGetXUIDForTFA);
+REX_EXPORT_STUB(__imp__XamUserInvalidateProfileSetting);
+REX_EXPORT_STUB(__imp__XamUserIsGuest);
+REX_EXPORT_STUB(__imp__XamUserIsLogonPreviewModeEnabled);
+REX_EXPORT_STUB(__imp__XamUserIsParentalControlled);
+REX_EXPORT_STUB(__imp__XamUserIsPartial);
+REX_EXPORT_STUB(__imp__XamUserIsPartialProfile);
+REX_EXPORT_STUB(__imp__XamUserIsUnsafeProgrammingAllowed);
+REX_EXPORT_STUB(__imp__XamUserLockLogonPreviewMode);
+REX_EXPORT_STUB(__imp__XamUserLogon);
+REX_EXPORT_STUB(__imp__XamUserLogonEx);
+REX_EXPORT_STUB(__imp__XamUserLookupDevice);
+REX_EXPORT_STUB(__imp__XamUserNuiBind);
+REX_EXPORT_STUB(__imp__XamUserNuiEnableBiometric);
+REX_EXPORT_STUB(__imp__XamUserNuiGetEnrollmentIndex);
+REX_EXPORT_STUB(__imp__XamUserNuiGetUserIndex);
+REX_EXPORT_STUB(__imp__XamUserNuiGetUserIndexForBind);
+REX_EXPORT_STUB(__imp__XamUserNuiGetUserIndexForSignin);
+REX_EXPORT_STUB(__imp__XamUserNuiIsBiometricEnabled);
+REX_EXPORT_STUB(__imp__XamUserNuiUnbind);
+REX_EXPORT_STUB(__imp__XamUserOverrideBindingCallbacks);
+REX_EXPORT_STUB(__imp__XamUserOverrideDeviceBindings);
+REX_EXPORT_STUB(__imp__XamUserOverrideGlobalState);
+REX_EXPORT_STUB(__imp__XamUserOverrideUserInfo);
+REX_EXPORT_STUB(__imp__XamUserPrefetchProfileSettings);
+REX_EXPORT_STUB(__imp__XamUserProfileSync);
+REX_EXPORT_STUB(__imp__XamUserReadUserPreference);
+REX_EXPORT_STUB(__imp__XamUserResetSubscriptionType);
+REX_EXPORT_STUB(__imp__XamUserUnlockLogonPreviewMode);
+REX_EXPORT_STUB(__imp__XamUserUpdateRecentPlayer);
+REX_EXPORT_STUB(__imp__XamUserValidateAvatarManifest);
+REX_EXPORT_STUB(__imp__XamUserWriteUserPreference);
+REX_EXPORT_STUB(__imp__XamVerifyPasscode);

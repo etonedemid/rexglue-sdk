@@ -12,9 +12,7 @@
 #include <rex/graphics/graphics_system.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cctype>
-#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -41,8 +39,11 @@ REXCVAR_DEFINE_STRING(swap_post_effect, "none", "GPU", "Swap post effect: none, 
     .allowed({"none", "fxaa", "fxaa_extreme"})
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+REXCVAR_DEFINE_BOOL(store_shaders, true, "GPU",
+                    "Store shaders persistently and load them when loading games to avoid "
+                    "runtime spikes and freezes when playing the game not for the first time.");
+
 namespace {
-constexpr bool kStoreShaders = true;
 
 rex::graphics::CommandProcessor::SwapPostEffect ParseSwapPostEffect(
     const std::string& effect_name) {
@@ -135,15 +136,15 @@ X_STATUS GraphicsSystem::Setup(runtime::FunctionDispatcher* function_dispatcher,
         uint64_t guest_tick_frequency = chrono::Clock::guest_tick_frequency();
         uint64_t vsync_interval_ticks =
             std::max(uint64_t(1), uint64_t(double(guest_tick_frequency) / refresh_rate_hz));
+        uint64_t no_vsync_interval_ticks = std::max(uint64_t(1), guest_tick_frequency / 1000);
         uint64_t last_frame_time = chrono::Clock::QueryGuestTickCount();
         while (vsync_worker_running_) {
           uint64_t current_time = chrono::Clock::QueryGuestTickCount();
-          // Guest VBlank rate is always based on video_mode_refresh_rate.
-          // The vsync cvar only controls host presentation sync (in presenter.cpp).
-          uint64_t interval_ticks = vsync_interval_ticks;
-          if (current_time - last_frame_time >= interval_ticks) {
+          uint64_t interval_ticks =
+              REXCVAR_GET(vsync) ? vsync_interval_ticks : no_vsync_interval_ticks;
+          while (current_time - last_frame_time >= interval_ticks) {
             MarkVblank();
-            last_frame_time = current_time;
+            last_frame_time += interval_ticks;
           }
           rex::thread::Sleep(std::chrono::milliseconds(1));
         }
@@ -292,13 +293,8 @@ void GraphicsSystem::DispatchInterruptCallback(uint32_t source, uint32_t cpu) {
   }
   thread->SetActiveCpu(cpu);
 
-  // Diagnostic: detect if interrupt dispatch is blocked
-  static std::atomic<uint64_t> dispatch_count{0};
-  static std::atomic<uint64_t> last_log_count{0};
-  auto count = dispatch_count.fetch_add(1);
-  if ((count % 500) == 0) {
-    REXGPU_INFO("DispatchInterruptCallback source={} cpu={} count={}", source, cpu, count);
-  }
+  // REXGPU_INFO("Dispatching GPU interrupt at {:08X} w/ mode {} on cpu {}",
+  //          interrupt_callback_, source, cpu);
 
   uint64_t args[] = {source, interrupt_callback_data_};
   function_dispatcher_->ExecuteInterrupt(thread->thread_state(), interrupt_callback_, args,
@@ -308,13 +304,6 @@ void GraphicsSystem::DispatchInterruptCallback(uint32_t source, uint32_t cpu) {
 void GraphicsSystem::MarkVblank() {
   // TODO: Enable profiling once ported
   // SCOPE_profile_cpu_f("gpu");
-
-  // Heartbeat: log periodically to confirm VSync thread is alive
-  static std::atomic<uint64_t> vblank_count{0};
-  auto count = vblank_count.fetch_add(1);
-  if ((count % 500) == 0) {
-    REXGPU_INFO("MarkVblank heartbeat: count={}", count);
-  }
 
   // Increment vblank counter (so the game sees us making progress).
   if (command_processor_) {
@@ -337,7 +326,7 @@ void GraphicsSystem::InvalidateGpuMemory() {
 
 void GraphicsSystem::InitializeShaderStorage(const std::filesystem::path& cache_root,
                                              uint32_t title_id, bool blocking) {
-  if (!kStoreShaders) {
+  if (!REXCVAR_GET(store_shaders)) {
     return;
   }
   if (blocking) {

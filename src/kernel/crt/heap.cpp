@@ -15,8 +15,7 @@
 
 #include <rex/cvar.h>
 #include <rex/math.h>
-#include <rex/platform.h>
-#include <rex/ppc/function.h>
+#include <rex/hook.h>
 #include <rex/system/xmemory.h>
 #include <rex/logging.h>
 
@@ -27,8 +26,6 @@ REXCVAR_DEFINE_BOOL(rexcrt_heap_enable, false, "crt",
 REXCVAR_DEFINE_UINT32(rexcrt_heap_size_mb, 256, "crt", "Heap size in megabytes")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly)
     .range(1, 2048);
-
-using namespace rex::ppc;
 
 // ---------------------------------------------------------------------------
 // Size header: prepended to every allocation so we can answer RtlSizeHeap
@@ -202,42 +199,24 @@ bool ReXHeap::AllocateSegmentLocked(uint32_t segment_size_bytes) {
       rex::align<uint32_t>(std::max(segment_size_bytes, kMinSegmentSize), O1HEAP_ALIGNMENT);
 
   uint32_t guest_base = 0;
-  bool used_system_heap = false;
 
-  auto alloc_regular_virtual_heap = [&]() -> bool {
-    auto* heap = mem->LookupHeapByType(false, 4096);
-    if (!heap ||
-        !heap->Alloc(segment_size_bytes, O1HEAP_ALIGNMENT,
-                     rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
-                     rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite, true,
-                     &guest_base)) {
-      return false;
-    }
-    return true;
-  };
-
-#if REX_PLATFORM_LINUX
-  if (!alloc_regular_virtual_heap()) {
-    REXKRNL_ERROR("rexcrt_heap: regular virtual heap allocation of {} bytes failed",
-                  segment_size_bytes);
+  // Allocate from the regular virtual heap (top-down) instead of the system
+  // heap. The system heap range is shared with kernel bookkeeping allocations
+  // (KernelState globals, thread PCR/TLS, module headers, etc.) and cannot
+  // accommodate a large contiguous rexcrt segment alongside them.
+  auto* vheap = mem->LookupHeapByType(false, 4096);
+  if (!vheap ||
+      !vheap->Alloc(segment_size_bytes, O1HEAP_ALIGNMENT,
+                    rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
+                    rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite, true,
+                    &guest_base)) {
+    REXKRNL_ERROR("rexcrt_heap: virtual heap allocation of {} bytes failed", segment_size_bytes);
     return false;
   }
-#else
-  guest_base = mem->SystemHeapAlloc(segment_size_bytes);
-  used_system_heap = guest_base != 0;
-  if (!guest_base && !alloc_regular_virtual_heap()) {
-    REXKRNL_ERROR("rexcrt_heap: failed to allocate {} bytes from both system and regular heaps",
-                  segment_size_bytes);
-    return false;
-  }
-#endif
 
   uint8_t* host_base = mem->TranslateVirtual<uint8_t*>(guest_base);
   if (!host_base) {
     REXKRNL_ERROR("rexcrt_heap: TranslateVirtual failed for guest base 0x{:08X}", guest_base);
-    if (used_system_heap) {
-      mem->SystemHeapFree(guest_base);
-    }
     return false;
   }
 
@@ -245,9 +224,6 @@ bool ReXHeap::AllocateSegmentLocked(uint32_t segment_size_bytes) {
   if (!heap) {
     REXKRNL_ERROR("rexcrt_heap: o1heapInit failed for segment 0x{:08X} size {}", guest_base,
                   segment_size_bytes);
-    if (used_system_heap) {
-      mem->SystemHeapFree(guest_base);
-    }
     return false;
   }
 
@@ -354,21 +330,20 @@ HeapDiagnostics ReXHeap::GetDiagnosticsLocked() const {
 
 ReXHeap g_heap;
 
-ppc_u32_result_t RtlAllocateHeap_entry(ppc_u32_t hHeap, ppc_u32_t dwFlags, ppc_u32_t dwBytes) {
+u32 RtlAllocateHeap_entry(u32 hHeap, u32 dwFlags, u32 dwBytes) {
   return g_heap.Alloc(dwBytes, dwFlags & HEAP_ZERO_MEMORY);
 }
 
-ppc_u32_result_t RtlFreeHeap_entry(ppc_u32_t hHeap, ppc_u32_t dwFlags, ppc_u32_t ptr) {
+u32 RtlFreeHeap_entry(u32 hHeap, u32 dwFlags, u32 ptr) {
   g_heap.Free(static_cast<uint32_t>(ptr));
   return 1;
 }
 
-ppc_u32_result_t RtlSizeHeap_entry(ppc_u32_t hHeap, ppc_u32_t dwFlags, ppc_u32_t ptr) {
+u32 RtlSizeHeap_entry(u32 hHeap, u32 dwFlags, u32 ptr) {
   return g_heap.Size(static_cast<uint32_t>(ptr));
 }
 
-ppc_u32_result_t RtlReAllocateHeap_entry(ppc_u32_t hHeap, ppc_u32_t dwFlags, ppc_u32_t ptr,
-                                         ppc_u32_t dwBytes) {
+u32 RtlReAllocateHeap_entry(u32 hHeap, u32 dwFlags, u32 ptr, u32 dwBytes) {
   return g_heap.Realloc(static_cast<uint32_t>(ptr), dwBytes, dwFlags & HEAP_ZERO_MEMORY);
 }
 
@@ -382,7 +357,7 @@ ReXHeap& GetHeap() {
 
 }  // namespace rex::kernel::crt
 
-REXCRT_EXPORT(rexcrt_RtlAllocateHeap, rex::kernel::crt::RtlAllocateHeap_entry)
-REXCRT_EXPORT(rexcrt_RtlFreeHeap, rex::kernel::crt::RtlFreeHeap_entry)
-REXCRT_EXPORT(rexcrt_RtlSizeHeap, rex::kernel::crt::RtlSizeHeap_entry)
-REXCRT_EXPORT(rexcrt_RtlReAllocateHeap, rex::kernel::crt::RtlReAllocateHeap_entry)
+REX_HOOK(rexcrt_RtlAllocateHeap, rex::kernel::crt::RtlAllocateHeap_entry)
+REX_HOOK(rexcrt_RtlFreeHeap, rex::kernel::crt::RtlFreeHeap_entry)
+REX_HOOK(rexcrt_RtlSizeHeap, rex::kernel::crt::RtlSizeHeap_entry)
+REX_HOOK(rexcrt_RtlReAllocateHeap, rex::kernel::crt::RtlReAllocateHeap_entry)

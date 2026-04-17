@@ -20,7 +20,6 @@
 #include <rex/ui/overlay/console_overlay.h>
 #include <rex/ui/overlay/debug_overlay.h>
 #include <rex/ui/overlay/settings_overlay.h>
-#include <rex/ui/achievement_toast.h>
 #include <rex/graphics/graphics_system.h>
 #if REX_HAS_VULKAN
 #include <rex/graphics/vulkan/graphics_system.h>
@@ -38,16 +37,13 @@
 #include <rex/ui/keybinds.h>
 #include <rex/version.h>
 
-#if REX_PLATFORM_ANDROID
-#include <rex/ui/windowed_app_context_android.h>
-#endif
-
 #include <imgui.h>
 
 #include <filesystem>
 
 REXCVAR_DEFINE_STRING(user_data_root, "", "Runtime", "Override user data path");
 REXCVAR_DEFINE_STRING(update_data_root, "", "Runtime", "Override update data path");
+REXCVAR_DEFINE_STRING(cache_path, "", "Runtime", "Override shader cache path");
 
 namespace rex {
 
@@ -88,34 +84,51 @@ bool ReXApp::OnInitialize() {
     update_dir = update_data_cvar;
   }
 
+  // Cache: cvar override, or user_dir/cache
+  std::filesystem::path cache_dir;
+  std::string cache_path_cvar = REXCVAR_GET(cache_path);
+  if (!cache_path_cvar.empty()) {
+    cache_dir = cache_path_cvar;
+  } else {
+    cache_dir = user_dir / "cache";
+  }
+
   // Allow subclass to override path defaults
-  PathConfig path_config{game_dir, user_dir, update_dir};
+  PathConfig path_config{game_dir, user_dir, update_dir, cache_dir};
   OnConfigurePaths(path_config);
   game_data_root_ = std::move(path_config.game_data_root);
   user_data_root_ = std::move(path_config.user_data_root);
   update_data_root_ = std::move(path_config.update_data_root);
+  cache_root_ = std::move(path_config.cache_root);
 
-  // Logging setup from CVARs
+  // Load config FIRST so log cvars have final values
+  auto config_path = exe_dir / (std::string(GetName()) + ".toml");
+  if (std::filesystem::exists(config_path))
+    rex::cvar::LoadConfig(config_path);
+
+  // Late-phase logging
   std::string log_file_cvar = REXCVAR_GET(log_file);
   std::string log_level_str = REXCVAR_GET(log_level);
-  if (REXCVAR_GET(log_verbose) && log_level_str == "info") {
+  if (REXCVAR_GET(log_verbose) && log_level_str == "info")
     log_level_str = "trace";
-  }
+
+  auto category_levels = rex::ParseCategoryLevelsFromConfig(config_path);
   auto log_config = rex::BuildLogConfig(log_file_cvar.empty() ? nullptr : log_file_cvar.c_str(),
-                                        log_level_str, {});
+                                        log_level_str, category_levels);
+  log_config.log_to_console = REXCVAR_GET(enable_console);
+  if (log_file_cvar.empty()) {
+    log_config.app_name = std::string(GetName());
+    log_config.log_dir = (exe_dir / "logs").string();
+  }
+
   rex::InitLogging(log_config);
   rex::RegisterLogLevelCallback();
 
-  // Attach log capture sink to all loggers for the console overlay
   log_sink_ = std::make_shared<rex::LogCaptureSink>();
   rex::AddSink(log_sink_);
 
-  // Load saved config (CVARs) before anything reads them
-  auto config_path = exe_dir / (std::string(GetName()) + ".toml");
-  if (std::filesystem::exists(config_path)) {
-    rex::cvar::LoadConfig(config_path);
+  if (std::filesystem::exists(config_path))
     REXLOG_INFO("Loaded config: {}", config_path.filename().string());
-  }
 
   REXLOG_INFO("{} starting", GetName());
   REXLOG_INFO("  Game directory: {}", game_data_root_.string());
@@ -125,9 +138,11 @@ bool ReXApp::OnInitialize() {
   if (!update_data_root_.empty()) {
     REXLOG_INFO("  Update data:    {}", update_data_root_.string());
   }
+  REXLOG_INFO("  Cache root:     {}", cache_root_.string());
 
   // Create runtime
-  runtime_ = std::make_unique<rex::Runtime>(game_data_root_, user_data_root_, update_data_root_);
+  runtime_ = std::make_unique<rex::Runtime>(game_data_root_, user_data_root_, update_data_root_,
+                                            cache_root_);
   runtime_->set_app_context(&app_context());
 
   // Build runtime config with default platform backends
@@ -165,8 +180,7 @@ bool ReXApp::OnInitialize() {
 
   OnPostLoadXexImage();
 
-  // Initialize rexcrt heap after LoadXexImage to avoid guest memory writes
-  // corrupting the heap region. rexcrt_heap is set by codegen (REXCRT_HEAP)
+  // Initialize rexcrt heap. rexcrt_heap is set by codegen (REXCRT_HEAP)
   // when [rexcrt] contains heap functions -- originals are stripped so init
   // is required. Size is controlled by the rexcrt_heap_size_mb CVAR.
   if (ppc_info_.rexcrt_heap) {
@@ -218,11 +232,34 @@ bool ReXApp::OnInitialize() {
         immediate_drawer_->SetPresenter(presenter);
         imgui_drawer_ = std::make_unique<rex::ui::ImGuiDrawer>(window_.get(), 64);
         imgui_drawer_->SetPresenterAndImmediateDrawer(presenter, immediate_drawer_.get());
-        // Built-in overlays
-        debug_overlay_ = std::make_unique<ui::DebugOverlayDialog>(imgui_drawer_.get());
-        console_overlay_ = std::make_unique<ui::ConsoleDialog>(imgui_drawer_.get(), log_sink_);
-        settings_overlay_ = std::make_unique<ui::SettingsDialog>(
-            imgui_drawer_.get(), exe_dir / (std::string(GetName()) + ".toml"));
+        // Overlay keybinds -- dialogs are created/destroyed on demand so
+        // ImGuiDrawer can detach when idle, enabling kGuestOutputThreadImmediately
+        // paint mode for 1:1 host-guest frame sync.
+        config_path_ = exe_dir / (std::string(GetName()) + ".toml");
+        rex::ui::RegisterBind("bind_debug_overlay", "F3", "Toggle debug overlay", [this] {
+          if (debug_overlay_) {
+            debug_overlay_.reset();
+          } else {
+            debug_overlay_ = std::make_unique<ui::DebugOverlayDialog>(imgui_drawer_.get(),
+                                                                      frame_stats_provider_);
+          }
+        });
+        rex::ui::RegisterBind("bind_console", "Backtick", "Toggle console overlay", [this] {
+          if (console_overlay_) {
+            console_overlay_.reset();
+          } else {
+            console_overlay_ = std::make_unique<ui::ConsoleDialog>(imgui_drawer_.get(), log_sink_);
+          }
+        });
+        rex::ui::RegisterBind("bind_settings", "F4", "Toggle settings overlay", [this] {
+          if (settings_overlay_) {
+            settings_overlay_.reset();
+          } else {
+            settings_overlay_ =
+                std::make_unique<ui::SettingsDialog>(imgui_drawer_.get(), config_path_);
+          }
+        });
+
         // Allow subclass to add custom dialogs
         OnCreateDialogs(imgui_drawer_.get());
 
@@ -232,42 +269,15 @@ bool ReXApp::OnInitialize() {
         // (e.g. overlay is open). This controls MnK mouse capture.
         auto* input_sys = static_cast<rex::input::InputSystem*>(runtime_->input_system());
         if (input_sys) {
-          input_sys->SetActiveCallback([]() { return !ImGui::GetIO().WantCaptureMouse; });
-
-          // Provide guest memory read callback for memory-based auto alt-mode.
-          auto* mem = runtime_->memory();
-          if (mem) {
-            input_sys->SetMemoryReadCallback(
-                [mem](uint32_t addr) -> uint32_t {
-                  auto* ptr = mem->TranslateVirtual<uint32_t*>(addr);
-                  return rex::byte_swap(*ptr);
-                });
-          }
+          input_sys->SetActiveCallback([this]() {
+            if (!debug_overlay_ && !console_overlay_ && !settings_overlay_)
+              return true;
+            return !ImGui::GetIO().WantCaptureMouse;
+          });
         }
       }
     }
     window_->SetPresenter(presenter);
-
-#if REX_PLATFORM_ANDROID
-    // On Android there is no OS paint event. Expose the presenter via the
-    // AndroidWindowedAppContext so nativePumpEvents can call
-    // PaintFromUIThread() every Vsync from the Choreographer callback.
-    if (auto* android_ctx =
-            dynamic_cast<rex::ui::AndroidWindowedAppContext*>(&app_context())) {
-      android_ctx->SetPresenter(presenter);
-    }
-#endif
-  }
-
-  // Initialize shader storage cache for persistent pipeline caching.
-  // This loads previously compiled pipeline descriptions from disk and
-  // pre-compiles them asynchronously, avoiding shader compilation stalls
-  // on subsequent runs.
-  if (auto* gs = dynamic_cast<rex::graphics::GraphicsSystem*>(runtime_->graphics_system())) {
-    auto title_id = runtime_->kernel_state()->title_id();
-    if (title_id && !user_data_root_.empty()) {
-      gs->InitializeShaderStorage(user_data_root_, title_id, false);
-    }
   }
 
   // Launch module in background
@@ -279,6 +289,17 @@ bool ReXApp::OnInitialize() {
       REXLOG_ERROR("Failed to launch module");
       app_context().QuitFromUIThread();
       return;
+    }
+
+    // Initialize shader storage (blocking) before guest execution starts.
+    auto* graphics_system =
+        static_cast<rex::graphics::GraphicsSystem*>(runtime_->graphics_system());
+    if (graphics_system && !runtime_->cache_root().empty()) {
+      uint32_t title_id = runtime_->kernel_state()->title_id();
+      if (title_id != 0) {
+        REXLOG_INFO("Initializing shader storage for title {:08X}...", title_id);
+        graphics_system->InitializeShaderStorage(runtime_->cache_root(), title_id, true);
+      }
     }
 
     OnPostLaunchModule(main_thread.get());
@@ -315,6 +336,11 @@ void ReXApp::OnDestroy() {
   // Notify subclass before cleanup
   OnShutdown();
 
+  // Unregister overlay keybinds before destroying dialogs
+  rex::ui::UnregisterBind("bind_debug_overlay");
+  rex::ui::UnregisterBind("bind_console");
+  rex::ui::UnregisterBind("bind_settings");
+
   // ImGui cleanup (reverse of setup)
   settings_overlay_.reset();
   console_overlay_.reset();
@@ -347,8 +373,9 @@ void ReXApp::OnDestroy() {
 }
 
 void ReXApp::SetGuestFrameStats(ui::DebugOverlayDialog::FrameStatsProvider provider) {
+  frame_stats_provider_ = provider;
   if (debug_overlay_) {
-    debug_overlay_->SetStatsProvider(std::move(provider));
+    debug_overlay_->SetStatsProvider(provider);
   }
 }
 
