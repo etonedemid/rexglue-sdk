@@ -15,9 +15,11 @@
 #include <cstring>
 
 #include <rex/cvar.h>
+#include <rex/kernel/xam/apps/xgi_app.h>
 #include <rex/kernel/xam/private.h>
 #include <rex/logging.h>
 #include <rex/math.h>
+#include <rex/system/xam/achievement_manager.h>
 #include <rex/hook.h>
 #include <rex/types.h>
 #include <rex/string/util.h>
@@ -624,12 +626,30 @@ u32 XamUserCreateAchievementEnumerator_entry(u32 title_id, u32 user_index, u32 x
 
   const util::XdbfGameData db = REX_KERNEL_STATE()->title_xdbf();
 
+  // Get AchievementManager to query unlock state
+  rex::system::xam::AchievementManager* achievement_manager = nullptr;
+  if (auto* app = REX_KERNEL_STATE()->app_manager()->FindById(0xFB)) {
+    achievement_manager =
+        static_cast<rex::kernel::xam::apps::XgiApp*>(app)->achievement_manager();
+  }
+
   if (db.is_valid()) {
     const XLanguage language =
         db.GetExistingLanguage(static_cast<XLanguage>(REXCVAR_GET(user_language)));
     const std::vector<util::XdbfAchievementTableEntry> achievement_list = db.GetAchievements();
 
     for (const util::XdbfAchievementTableEntry& entry : achievement_list) {
+      uint32_t achievement_flags = entry.flags;
+      uint32_t unlock_time_lo = 0;
+      uint32_t unlock_time_hi = 0;
+
+      if (achievement_manager && achievement_manager->IsUnlocked(entry.id)) {
+        achievement_flags |= 0x30000;  // ACHIEVED_ONLINE | ACHIEVED
+        uint64_t ft = achievement_manager->GetUnlockTime(entry.id);
+        unlock_time_lo = static_cast<uint32_t>(ft & 0xFFFFFFFF);
+        unlock_time_hi = static_cast<uint32_t>(ft >> 32);
+      }
+
       auto item = XStaticAchievementEnumerator::AchievementDetails{
           entry.id,
           rex::string::to_utf16(db.GetStringTableEntry(language, entry.label_id)),
@@ -637,8 +657,8 @@ u32 XamUserCreateAchievementEnumerator_entry(u32 title_id, u32 user_index, u32 x
           rex::string::to_utf16(db.GetStringTableEntry(language, entry.unachieved_id)),
           entry.image_id,
           entry.gamerscore,
-          {0, 0},
-          entry.flags};
+          {unlock_time_lo, unlock_time_hi},
+          achievement_flags};
 
       e->AppendItem(item);
     }
