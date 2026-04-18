@@ -54,6 +54,7 @@ elseif(UNIX)
         fiber_posix.cpp
         fiber_android.cpp
         filesystem_android.cpp
+        glibc_compat.cpp
         mapped_memory_posix.cpp
         math_gcc.cpp
         memory_posix.cpp
