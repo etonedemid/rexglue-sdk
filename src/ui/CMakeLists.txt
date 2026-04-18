@@ -101,6 +101,7 @@ target_link_libraries(rexui PUBLIC
     rexcore
     renderdoc
     imgui::imgui
+    SDL3::SDL3
 )
 
 if(REXGLUE_FIDELITYFX_SOURCE_DIR AND EXISTS "${REXGLUE_FIDELITYFX_SOURCE_DIR}/sdk/include")
