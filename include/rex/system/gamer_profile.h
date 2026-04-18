@@ -47,6 +47,12 @@ struct GamerProfile {
     std::vector<GamePlaytime> playtime;
 };
 
+/// Minimal info for profile discovery (stored in profiles.json)
+struct ProfileEntry {
+    uint64_t xuid;
+    std::string gamertag;
+};
+
 class GamerProfileManager {
 public:
     static GamerProfileManager& instance();
@@ -54,17 +60,35 @@ public:
     /// Get shared storage root: ~/.local/share/rexglue/
     std::filesystem::path shared_root() const;
 
-    /// Profile file path
+    /// Per-XUID profile root: shared_root()/profiles/{XUID}/
+    std::filesystem::path profile_root() const;
+
+    /// Profile file path (inside profile_root)
     std::filesystem::path profile_path() const;
 
-    /// Achievements storage path for a title
+    /// Achievements storage path for a title (inside profile_root)
     std::filesystem::path achievements_path(uint32_t title_id) const;
 
-    /// Playtime storage path
+    /// Playtime storage path (inside profile_root)
     std::filesystem::path playtime_path() const;
 
-    /// Gamerpics directory
+    /// Gamerpics directory (shared, not per-user)
     std::filesystem::path gamerpics_dir() const;
+
+    /// Set the active XUID (selects which profile folder to use)
+    void set_active_xuid(uint64_t xuid);
+
+    /// Get active XUID
+    uint64_t active_xuid() const { return active_xuid_; }
+
+    /// Enumerate all known profiles from profiles.json
+    std::vector<ProfileEntry> enumerate_profiles() const;
+
+    /// Save the profile index (profiles.json)
+    void save_profile_index() const;
+
+    /// Migrate legacy flat layout to per-XUID folders
+    void migrate_legacy_data();
 
     /// Load or create the active profile. If none exists, creates a default.
     bool load_or_create_default();
@@ -125,6 +149,7 @@ private:
     void save_achievements_impl(uint32_t title_id, const std::vector<Achievement>& achievements) const;
 
     GamerProfile profile_;
+    uint64_t active_xuid_ = 0;
     mutable std::mutex mutex_;
 
     // Active session tracking

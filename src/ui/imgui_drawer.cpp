@@ -23,6 +23,7 @@
 #include <rex/ui/window.h>
 
 #include <imgui.h>
+#include <SDL3/SDL_events.h>
 #include <SDL3/SDL_gamepad.h>
 
 namespace rex {
@@ -388,6 +389,11 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
   io.DisplaySize.x = window_->GetActualPhysicalWidth() * physical_to_logical;
   io.DisplaySize.y = window_->GetActualPhysicalHeight() * physical_to_logical;
 
+  // Pump SDL events so gamepad state is fresh.  The game's input driver
+  // skips pumping when overlays are active (is_active() == false), which
+  // would leave SDL_GetGamepadButton() returning stale zeros.
+  SDL_PumpEvents();
+
   // Poll SDL gamepad state and feed to ImGui navigation.
   // Use SDL_OpenGamepad for a ref-counted handle that works regardless of
   // whether the SDL input driver has already opened the gamepad.
@@ -428,9 +434,12 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
       io.AddKeyAnalogEvent(ImGuiKey_GamepadR2,
           SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 0,
           SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) / 32767.0f);
-      // Left stick (analog, normalized to 0..1 per direction)
+      // Left stick (analog, normalized to 0..1 per direction, with deadzone)
+      constexpr Sint16 kStickDeadzone = 7849;  // ~24 % of 32767
       Sint16 lx = SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTX);
       Sint16 ly = SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTY);
+      if (lx > -kStickDeadzone && lx < kStickDeadzone) lx = 0;
+      if (ly > -kStickDeadzone && ly < kStickDeadzone) ly = 0;
       io.AddKeyAnalogEvent(ImGuiKey_GamepadLStickLeft,  lx < 0, lx < 0 ? -lx / 32767.0f : 0.f);
       io.AddKeyAnalogEvent(ImGuiKey_GamepadLStickRight, lx > 0, lx > 0 ?  lx / 32767.0f : 0.f);
       io.AddKeyAnalogEvent(ImGuiKey_GamepadLStickUp,    ly < 0, ly < 0 ? -ly / 32767.0f : 0.f);
