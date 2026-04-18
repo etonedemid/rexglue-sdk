@@ -25,6 +25,8 @@ static constexpr const char* kProfileFileName = "profile.json";
 static constexpr const char* kPlaytimeFileName = "playtime.json";
 static constexpr const char* kAchievementsDir = "achievements";
 static constexpr const char* kGamepicsDir = "gamerpics";
+static constexpr const char* kProfilesDir = "profiles";
+static constexpr const char* kProfilesIndexFile = "profiles.json";
 
 static int64_t now_unix() {
     return std::chrono::duration_cast<std::chrono::seconds>(
@@ -64,16 +66,20 @@ std::filesystem::path GamerProfileManager::shared_root() const {
     return std::filesystem::current_path() / ".rexglue";
 }
 
+std::filesystem::path GamerProfileManager::profile_root() const {
+    return shared_root() / kProfilesDir / fmt::format("{:016X}", active_xuid_);
+}
+
 std::filesystem::path GamerProfileManager::profile_path() const {
-    return shared_root() / kProfileFileName;
+    return profile_root() / kProfileFileName;
 }
 
 std::filesystem::path GamerProfileManager::achievements_path(uint32_t title_id) const {
-    return shared_root() / kAchievementsDir / fmt::format("{:08X}.json", title_id);
+    return profile_root() / kAchievementsDir / fmt::format("{:08X}.json", title_id);
 }
 
 std::filesystem::path GamerProfileManager::playtime_path() const {
-    return shared_root() / kPlaytimeFileName;
+    return profile_root() / kPlaytimeFileName;
 }
 
 std::filesystem::path GamerProfileManager::gamerpics_dir() const {
@@ -81,21 +87,159 @@ std::filesystem::path GamerProfileManager::gamerpics_dir() const {
 }
 
 void GamerProfileManager::ensure_dirs() const {
-    std::filesystem::create_directories(shared_root() / kAchievementsDir);
+    std::filesystem::create_directories(profile_root() / kAchievementsDir);
     std::filesystem::create_directories(gamerpics_dir());
 }
 
+void GamerProfileManager::set_active_xuid(uint64_t xuid) {
+    active_xuid_ = xuid;
+}
+
+std::vector<ProfileEntry> GamerProfileManager::enumerate_profiles() const {
+    std::vector<ProfileEntry> entries;
+    auto index_path = shared_root() / kProfilesIndexFile;
+    if (!std::filesystem::exists(index_path)) return entries;
+
+    try {
+        std::ifstream f(index_path);
+        if (!f.is_open()) return entries;
+        json j = json::parse(f);
+        for (auto& entry : j) {
+            ProfileEntry pe;
+            pe.xuid = std::stoull(entry.value("xuid", "0"), nullptr, 0);
+            pe.gamertag = entry.value("gamertag", "Player");
+            if (pe.xuid != 0) entries.push_back(pe);
+        }
+    } catch (...) {}
+
+    return entries;
+}
+
+void GamerProfileManager::save_profile_index() const {
+    try {
+        std::filesystem::create_directories(shared_root());
+        auto index_path = shared_root() / kProfilesIndexFile;
+
+        // Read existing entries, update/add ours
+        json arr = json::array();
+        if (std::filesystem::exists(index_path)) {
+            std::ifstream f(index_path);
+            if (f.is_open()) {
+                try { arr = json::parse(f); } catch (...) { arr = json::array(); }
+            }
+        }
+
+        bool found = false;
+        auto xuid_str = fmt::format("0x{:016X}", profile_.xuid);
+        for (auto& entry : arr) {
+            if (entry.value("xuid", "") == xuid_str) {
+                entry["gamertag"] = profile_.gamertag;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            json entry;
+            entry["xuid"] = xuid_str;
+            entry["gamertag"] = profile_.gamertag;
+            arr.push_back(entry);
+        }
+
+        std::ofstream f(index_path);
+        if (f.is_open()) f << arr.dump(2);
+    } catch (...) {}
+}
+
+void GamerProfileManager::migrate_legacy_data() {
+    // Check for legacy flat layout: shared_root()/profile.json
+    auto legacy_profile = shared_root() / kProfileFileName;
+    if (!std::filesystem::exists(legacy_profile)) return;
+
+    try {
+        std::ifstream f(legacy_profile);
+        if (!f.is_open()) return;
+        json j = json::parse(f);
+        f.close();
+
+        uint64_t xuid = 0;
+        if (j.contains("xuid") && j["xuid"].is_string()) {
+            xuid = std::stoull(j["xuid"].get<std::string>(), nullptr, 0);
+        } else {
+            xuid = j.value("xuid", generate_xuid());
+        }
+
+        // Create per-XUID directory and move files
+        auto dest_dir = shared_root() / kProfilesDir / fmt::format("{:016X}", xuid);
+        std::filesystem::create_directories(dest_dir / kAchievementsDir);
+
+        // Move profile.json
+        std::filesystem::rename(legacy_profile, dest_dir / kProfileFileName);
+
+        // Move playtime.json
+        auto legacy_playtime = shared_root() / kPlaytimeFileName;
+        if (std::filesystem::exists(legacy_playtime)) {
+            std::filesystem::rename(legacy_playtime, dest_dir / kPlaytimeFileName);
+        }
+
+        // Move achievements/
+        auto legacy_achiev = shared_root() / kAchievementsDir;
+        if (std::filesystem::exists(legacy_achiev) && std::filesystem::is_directory(legacy_achiev)) {
+            for (auto& entry : std::filesystem::directory_iterator(legacy_achiev)) {
+                std::filesystem::rename(entry.path(), dest_dir / kAchievementsDir / entry.path().filename());
+            }
+            std::filesystem::remove(legacy_achiev);
+        }
+
+        // Create profiles.json index
+        auto gamertag = j.value("gamertag", "Player");
+        json arr = json::array();
+        json pe;
+        pe["xuid"] = fmt::format("0x{:016X}", xuid);
+        pe["gamertag"] = gamertag;
+        arr.push_back(pe);
+        std::ofstream idx(shared_root() / kProfilesIndexFile);
+        if (idx.is_open()) idx << arr.dump(2);
+
+        REXSYS_INFO("Migrated legacy profile data to per-XUID folder {:016X}", xuid);
+    } catch (const std::exception& e) {
+        REXSYS_ERROR("Failed to migrate legacy profile data: {}", e.what());
+    }
+}
+
 bool GamerProfileManager::profile_exists() const {
+    if (active_xuid_ == 0) {
+        // Check if any profiles exist at all (legacy or new)
+        auto legacy = shared_root() / kProfileFileName;
+        auto index = shared_root() / kProfilesIndexFile;
+        return std::filesystem::exists(legacy) || std::filesystem::exists(index);
+    }
     return std::filesystem::exists(profile_path());
 }
 
 bool GamerProfileManager::load_or_create_default() {
     std::lock_guard lock(mutex_);
-    if (profile_exists()) {
+
+    // Migrate legacy flat layout if present
+    migrate_legacy_data();
+
+    // If an active_xuid_ is set and the profile exists, load it
+    if (active_xuid_ != 0 && std::filesystem::exists(profile_path())) {
         return load_impl();
     }
 
+    // Try to load first profile from index
+    auto profiles = enumerate_profiles();
+    if (!profiles.empty() && active_xuid_ == 0) {
+        active_xuid_ = profiles[0].xuid;
+        if (std::filesystem::exists(profile_path())) {
+            return load_impl();
+        }
+    }
+
     // Create default profile
+    if (active_xuid_ == 0) {
+        active_xuid_ = generate_xuid();
+    }
     ensure_dirs();
 
     profile_.gamertag = "Player";
@@ -195,6 +339,9 @@ bool GamerProfileManager::save_impl() const {
             pf << pj.dump(2);
             pf.close();
         }
+
+        // Update profile index
+        save_profile_index();
 
         return true;
     } catch (const json::exception& e) {
@@ -326,7 +473,7 @@ void GamerProfileManager::save_achievements_impl(uint32_t title_id,
 uint32_t GamerProfileManager::compute_total_gamerscore() const {
     uint32_t total = 0;
 
-    auto achiev_dir = shared_root() / kAchievementsDir;
+    auto achiev_dir = profile_root() / kAchievementsDir;
     if (!std::filesystem::exists(achiev_dir)) return 0;
 
     for (auto& entry : std::filesystem::directory_iterator(achiev_dir)) {

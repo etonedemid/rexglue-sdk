@@ -117,7 +117,13 @@ bool ReXApp::OnInitialize() {
                                         log_level_str, category_levels);
   if (log_file_cvar.empty()) {
     log_config.app_name = std::string(GetName());
-    log_config.log_dir = (exe_dir / "logs").string();
+    // Always write logs to the user data directory, not next to the binary.
+    // This avoids failures when running from a read-only location (AppImage,
+    // installed prefix, etc.).
+    auto log_base = user_data_root_.empty()
+                        ? rex::filesystem::GetUserFolder() / GetName()
+                        : user_data_root_;
+    log_config.log_dir = (log_base / "logs").string();
   }
 
   rex::InitLogging(log_config);
