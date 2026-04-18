@@ -52,6 +52,7 @@ elseif(UNIX)
         exception_handler_posix.cpp
         filesystem_posix.cpp
         fiber_posix.cpp
+        glibc_compat.cpp
         mapped_memory_posix.cpp
         math_gcc.cpp
         memory_posix.cpp
