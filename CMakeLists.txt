@@ -69,6 +69,18 @@ if(UNIX AND NOT APPLE)
         "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
     )
     set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
+
+    # Pin to glibc 2.17 (Ubuntu 14.04 / CentOS 7 baseline).
+    #
+    # 1. Force C17 for any vendored C code so glibc does not activate
+    #    __USE_ISOC2X / __USE_ISOC23, which redirects strtol → __isoc23_strtol
+    #    and similar, creating a hard GLIBC_2.38 dependency.
+    set(CMAKE_C_STANDARD 17)
+    set(CMAKE_C_STANDARD_REQUIRED ON)
+
+    # 2. Suppress glibc's C23 extension macros in C++ translation units as
+    #    well (some thirdparty system headers check __STDC_VERSION__).
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-D_ISOC2X_SOURCE=0>)
 endif()
 
 # Enforce Clang18 compiler

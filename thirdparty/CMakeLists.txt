@@ -233,6 +233,9 @@ set(SDL_INSTALL ON CACHE BOOL "" FORCE)
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TEST OFF CACHE BOOL "" FORCE)
+# Use SDL's own C stdlib wrappers instead of the system libc, so the binary
+# does not import strlcpy/strlcat/wcslcpy/wcslcat from glibc (added in 2.38).
+set(SDL_LIBC OFF CACHE BOOL "" FORCE)
 set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
 
 # Disable unused subsystems
